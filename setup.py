@@ -5,7 +5,7 @@ setup(
     name="aapyt",
     packages=find_packages(),
     version=__version__,
-    description="Android APK Information extractor",
+    description="Python wrapper for aapt",
     long_description=(open('README.md', encoding='utf-8').read()),
     long_description_content_type="text/markdown",
     author_email='davidlev@telegmail.com',
@@ -17,11 +17,4 @@ setup(
     download_url="https://pypi.org/project/aapyt/",
     author='David Lev',
     license='MIT',
-    install_requires=['click'],
-    platforms='any',
-    entry_points={
-        'console_scripts': [
-            'aapyt = aapyt.cli:cli',
-        ],
-    },
 )

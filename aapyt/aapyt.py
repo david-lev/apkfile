@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Union
 def get_aapt_path() -> str:
     aapt_path = shutil.which('aapt')
     if aapt_path is None:
-        raise Exception('aapt not found')
+        raise Exception('aapt not found! see https://github.com/david-lev/aapyt#install-aapt')
     return aapt_path
 
 
@@ -28,6 +28,13 @@ class InstallLocation(str, Enum):
     INTERNAL_ONLY = 'internalOnly'
     PREFER_EXTERNAL = 'preferExternal'
 
+    @classmethod
+    def _missing_(cls, value):
+        return cls.AUTO
+
+    def __repr__(self):
+        return self.value
+
 
 class Abi(str, Enum):
     ALL = 'all'
@@ -36,6 +43,13 @@ class Abi(str, Enum):
     ARM64 = 'arm64-v8a'
     X86 = 'x86'
     X86_64 = 'x86_64'
+
+    @classmethod
+    def _missing_(cls, value):
+        return cls.ALL
+
+    def __repr__(self):
+        return self.value
 
 
 @dataclass(frozen=True)
