@@ -1,7 +1,7 @@
 import re
 import subprocess
 import shutil
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict, fields, field
 from enum import Enum
 from typing import List, Optional, Dict, Union
 
@@ -53,53 +53,31 @@ class Abi(str, Enum):
 
 
 @dataclass(frozen=True)
-class Patterns:
-    package_name: str = r'package: name=\'([^\']+)\''
-    version_code: str = r'versionCode=\'([^\']+)\''
-    version_name: str = r'versionName=\'([^\']+)\''
-    min_sdk_version: str = r'sdkVersion:\'([^\']+)\''
-    target_sdk_version: str = r'targetSdkVersion:\'([^\']+)\''
-    install_location: str = r'install-location:\'([^\']+)\''
-    labels: str = r'application-label-([a-z]{2}):\'' + r'([^\']+)\''
-    uses_permissions: str = r'uses-permission: name=\'([^\']+)\''
-    libraries: str = r'uses-library(?:-not-required)?:\'([^\']+)\''
-    features: str = r'uses-feature(?:-not-required)?: name=\'([^\']+)\''
-    launchable_activity: str = r'launchable-activity: name=\'([^\']+)\''
-    supports_screens: str = r'supports-screens: \'([a-z\'\s]+)\''
-    supports_any_density: str = r'supports-any-density: \'([^\']+)\''
-    langs: str = r'locales: \'([a-zA-Z\'\s\-\_]+)\''
-    densities: str = r'densities: \'([0-9\'\s]+)\''
-    abis: str = r'native-code: \'([^\']+)\''
-    icons: str = r'application-icon-([0-9]+):\'' + r'([^\']+)\''
-    split_name: str = r'split=\'([^\']+)\''
-
-
-@dataclass(frozen=True)
 class ApkInfo:
-    package_name: str
-    version_code: int
-    version_name: Optional[str]
-    min_sdk_version: Optional[int]
-    target_sdk_version: Optional[int]
-    install_location: Optional[InstallLocation]
-    labels: Optional[Dict[str, str]]
-    uses_permissions: Optional[List[str]]
-    libraries: Optional[List[str]]
-    features: Optional[List[str]]
-    launchable_activity: Optional[str]
-    supports_screens: Optional[List[str]]
-    supports_any_density: Optional[bool]
-    langs: Optional[List[str]]
-    densities: Optional[List[str]]
-    abis: Optional[List[Abi]]
-    icons: Optional[Dict[int, str]]
-    split_name: Optional[str]
-    is_split: bool
+    package_name: str = field(default=r'package: name=\'([^\']+)\'')
+    version_code: int = field(default=r'versionCode=\'([^\']+)\'')
+    version_name: Optional[str] = field(default=r'versionName=\'([^\']+)\'')
+    min_sdk_version: Optional[int] = field(default=r'sdkVersion:\'([^\']+)\'')
+    target_sdk_version: Optional[int] = field(default=r'targetSdkVersion:\'([^\']+)\'')
+    install_location: Optional[InstallLocation] = field(default=r'install-location:\'([^\']+)\'')
+    labels: Optional[Dict[str, str]] = field(default=r'application-label-([a-z]{2}):\'' + r'([^\']+)\'')
+    permissions: Optional[List[str]] = field(default=r'uses-permission: name=\'([^\']+)\'')
+    libraries: Optional[List[str]] = field(default=r'uses-library(?:-not-required)?:\'([^\']+)\'')
+    features: Optional[List[str]] = field(default=r'uses-feature(?:-not-required)?: name=\'([^\']+)\'')
+    launchable_activity: Optional[str] = field(default=r'launchable-activity: name=\'([^\']+)\'')
+    supported_screens: Optional[List[str]] = field(default=r'supports-screens: \'([a-z\'\s]+)\'')
+    supports_any_density: Optional[bool] = field(default=r'supports-any-density: \'([^\']+)\'')
+    langs: Optional[List[str]] = field(default=r'locales: \'([a-zA-Z\'\s\-\_]+)\'')
+    densities: Optional[List[str]] = field(default=r'densities: \'([0-9\'\s]+)\'')
+    abis: Optional[List[Abi]] = field(default=r'native-code: \'([^\']+)\'')
+    icons: Optional[Dict[int, str]] = field(default=r'application-icon-([0-9]+):\'' + r'([^\']+)\'')
+    split_name: Optional[str] = field(default=r'split=\'([^\']+)\'')
+    is_split: bool = field(default=False)
 
 
 def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) -> Union[ApkInfo, Dict]:
     raw = get_raw_aapt(apk_path, aapt_path)
-    data = {field.name: re.findall(getattr(Patterns, field.name), raw) for field in fields(ApkInfo)}
+    data = {f.name: re.findall(str(f.default), raw) for f in fields(ApkInfo)}
     info = ApkInfo(
         package_name=data['package_name'][0],
         version_code=int(data['version_code'][0]),
@@ -109,11 +87,11 @@ def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) ->
         install_location=InstallLocation(data['install_location'][0]) if data.get(
             'install_location') else InstallLocation.AUTO,
         labels={lang: label for lang, label in data['labels']} if data.get('labels') else None,
-        uses_permissions=data['uses_permissions'] if data.get('uses_permissions') else None,
+        permissions=data['uses_permissions'] if data.get('uses_permissions') else None,
         libraries=data['libraries'] if data.get('libraries') else None,
         features=data['features'] if data.get('features') else None,
         launchable_activity=data['launchable_activity'][0] if data.get('launchable_activity') else None,
-        supports_screens=re.split(r"'\s'", data['supports_screens'][0]) if data.get('supports_screens') else None,
+        supported_screens=re.split(r"'\s'", data['supports_screens'][0]) if data.get('supports_screens') else None,
         supports_any_density=(data['supports_any_density'][0] == 'true') if data.get(
             'supports_any_density') is not None else None,
         langs=[lang.strip() for lang in re.split(r"'\s'", data['langs'][0]) if
