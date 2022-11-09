@@ -1,6 +1,7 @@
----
 # ⛏️ AAPYT • Python wrapper for aapt
 [![CodeFactor](https://www.codefactor.io/repository/github/david-lev/aapyt/badge)](https://www.codefactor.io/repository/github/david-lev/aapyt)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/aapyt?style=flat-square)](https://badge.fury.io/py/aapyt)
+[![PyPI Version](https://badge.fury.io/py/aapyt.svg)](https://pypi.org/project/aapyt/)
 
 **AAPYT** is a Python wrapper for the Android Asset Packaging Tool ([aapt](https://elinux.org/Android_aapt)) that allows you to extract information from Android APK files.
 
