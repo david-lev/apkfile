@@ -20,10 +20,10 @@ print(info.labels.get('en') if info.labels else None) # WhatsApp
 print(info.abis) # ['armeabi-v7a', 'arm64-v8a']
 
 # get data as dict
-print(get_apk_info('/home/david/whatsapp.apk', as_dict=True))
+print(get_apk_info(apk_path, as_dict=True))
 
 # provide path to aapt
-get_apk_info('/home/david/whatsapp.apk', aapt_path='./aapt')
+get_apk_info(apk_path, aapt_path='./aapt')
 
 # example to extract app icon
 from zipfile import ZipFile
