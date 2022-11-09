@@ -71,6 +71,7 @@ class Patterns:
     densities: str = r'densities: \'([0-9\'\s]+)\''
     abis: str = r'native-code: \'([^\']+)\''
     icons: str = r'application-icon-([0-9]+):\'' + r'([^\']+)\''
+    split_name: str = r'split=\'([^\']+)\''
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,8 @@ class ApkInfo:
     densities: Optional[List[str]]
     abis: Optional[List[Abi]]
     icons: Optional[Dict[int, str]]
+    split_name: Optional[str]
+    is_split: bool
 
 
 def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) -> Union[ApkInfo, Dict]:
@@ -117,7 +120,9 @@ def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) ->
                re.match(r'^[A-Za-z\-]+$', lang)] if data.get('langs') else None,
         densities=re.split(r"'\s'", data['densities'][0]) if data.get('densities') else None,
         abis=[Abi(abi) for abi in re.split(r"'\s'", data['abis'][0])] if data.get('abis') else Abi.ALL,
-        icons={int(size): icon for size, icon in data['icons']} if data.get('icons') else None
+        icons={int(size): icon for size, icon in data['icons']} if data.get('icons') else None,
+        split_name=data['split_name'][0] if data.get('split_name') else None,
+        is_split=bool(data.get('split_name'))
     )
 
     return info if not as_dict else asdict(info)
