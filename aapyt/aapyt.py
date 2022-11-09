@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Union
 def get_aapt_path() -> str:
     aapt_path = shutil.which('aapt')
     if aapt_path is None:
-        raise Exception('aapt not found! see https://github.com/david-lev/aapyt#install-aapt')
+        raise FileNotFoundError('aapt not found! see https://github.com/david-lev/aapyt#install-aapt')
     return aapt_path
 
 
@@ -75,9 +75,6 @@ class Patterns:
 
 @dataclass(frozen=True)
 class ApkInfo:
-    __slots__ = ['package_name', 'version_code', 'version_name', 'min_sdk_version', 'target_sdk_version',
-                 'install_location', 'labels', 'uses_permissions', 'libraries', 'features', 'launchable_activity',
-                 'supports_screens', 'supports_any_density', 'langs', 'densities', 'abis', 'icons']
     package_name: str
     version_code: int
     version_name: Optional[str]
@@ -98,8 +95,8 @@ class ApkInfo:
 
 
 def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) -> Union[ApkInfo, Dict]:
-    data = {field.name: re.findall(getattr(Patterns, field.name),
-                                   get_raw_aapt(apk_path, aapt_path)) for field in fields(ApkInfo)}
+    raw = get_raw_aapt(apk_path, aapt_path)
+    data = {field.name: re.findall(getattr(Patterns, field.name), raw) for field in fields(ApkInfo)}
     info = ApkInfo(
         package_name=data['package_name'][0],
         version_code=int(data['version_code'][0]),
