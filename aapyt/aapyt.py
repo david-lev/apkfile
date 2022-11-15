@@ -87,7 +87,7 @@ def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) ->
         install_location=InstallLocation(data['install_location'][0]) if data.get(
             'install_location') else InstallLocation.AUTO,
         labels={lang: label for lang, label in data['labels']} if data.get('labels') else None,
-        permissions=tuple(data['uses_permissions']) if data.get('uses_permissions') else None,
+        permissions=tuple(data['permissions']) if data.get('permissions') else None,
         libraries=tuple(data['libraries']) if data.get('libraries') else None,
         features=tuple(data['features']) if data.get('features') else None,
         launchable_activity=data['launchable_activity'][0] if data.get('launchable_activity') else None,
