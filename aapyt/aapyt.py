@@ -22,17 +22,15 @@ def get_aapt_path() -> str:
     return aapt_path
 
 
-def get_raw_aapt(apk_path: str, aapt_path: str = None) -> str:
+def get_raw_aapt(apk_path: str, aapt_path: Optional[str] = None) -> str:
     """Helper function to get the raw output of aapt."""
-    if not shutil.which(apk_path):
-        raise FileNotFoundError(f'File not found: {apk_path}')
     try:
         return subprocess.run(
             [aapt_path or get_aapt_path(), 'd', 'badging', apk_path],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             check=True).stdout.decode('utf-8')
     except subprocess.CalledProcessError as e:
-        raise Exception(e.stderr.decode('utf-8'))
+        raise RuntimeError(e.stderr.decode('utf-8'))
 
 
 class InstallLocation(Enum):
@@ -154,7 +152,7 @@ class ApkInfo:
         return not self.abis or all(abi in self.abis for abi in Abi.all())
 
 
-def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) -> Union[ApkInfo, Dict]:
+def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: Optional[str] = None) -> Union[ApkInfo, Dict]:
     """
     Get apk info.
 
@@ -162,8 +160,24 @@ def get_apk_info(apk_path: str, as_dict: bool = False, aapt_path: str = None) ->
         apk_path: Path to the apk file. (e.g. '/path/to/app.apk')
         as_dict: Return a dict instead of ApkInfo object (default: False).
         aapt_path: Path to aapt binary (if not in PATH).
+
+    Returns:
+        ApkInfo object or dict if `as_dict` is True.
+
+    Raises:
+        FileNotFoundError: If aapt binary or apk file not found.
+        FileExistsError: If apk file is not a valid apk file.
+        RuntimeError: If aapt binary failed to run.
     """
-    raw = get_raw_aapt(apk_path, aapt_path)
+    try:
+        raw = get_raw_aapt(apk_path, aapt_path)
+    except RuntimeError as e:
+        err_msg = str(e)
+        if 'Invalid file' in err_msg:
+            raise FileExistsError(err_msg)
+        elif 'is neither a directory nor file' in err_msg:
+            raise FileNotFoundError(err_msg)
+        raise
     data = {f.name: re.findall(str(f.default), raw) for f in fields(ApkInfo)}
     info = ApkInfo(
         package_name=data['package_name'][0],
