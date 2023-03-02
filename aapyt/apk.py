@@ -36,8 +36,7 @@ class ApkFile:
     devices, while other apps can be downloaded from Google Play. Apps downloaded from Google Play are automatically
     installed on your device, while those downloaded from other sources must be installed manually.
         `For more information ↗️ <https://fileinfo.com/extension/apk>`_.
-        `APKMirror ↗️ <https://www.apkmirror.com/>`_.
-
+        `APK in Wikipedia ↗️ <https://en.wikipedia.org/wiki/Apk_(file_format)>`_.
 
     Attributes:
         package_name: The package name of an Android app uniquely identifies the app on the device, in Google Play Store, and in supported third-party Android stores.

@@ -16,6 +16,7 @@ class APKMFile:
     installer. It is similar to an .AAB file, in that it contains a number of .APK files used to install an Android
     app. APKM files, however, can be installed only using APKMirror Installer
         `For more information ↗️ <https://fileinfo.com/extension/apkm>`_.
+        `APKMirror ↗️ <https://www.apkmirror.com/>`_.
 
     Attributes:
         base: The base apk file.
