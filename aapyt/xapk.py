@@ -5,20 +5,19 @@ import tempfile
 from typing import Tuple, Optional, Dict
 from zipfile import ZipFile
 from aapyt.apk import ApkFile
-from aapyt.utils import Abi, InstallLocation
+from aapyt.utils import Abi, InstallLocation, install_apks
 
 
-class XAPKFile:
+class XapkFile:
     """
-    An object representing an xapk file.
+    An object representing a xapk file.
 
-    An XAPK file is a package used to install Android apps on mobile devices. It is similar to the standard .APK format,
+    From `fileinfo.com <https://fileinfo.com/extension/xapk>`_: An ``XAPK`` file is a package used to install Android apps on mobile devices. It is similar to the standard .APK format,
     but may contain other assets used by the app, such as an .OBB file, which stores graphics, media files, and other
     app data. XAPK files are used for distributing apps on third-party Android app download websites. They are not
     supported by Google Play.
 
-        `For more information ↗️ <https://fileinfo.com/extension/xapk>`_.
-        `APKPure ↗️ <https://apkpure.com/>`_.
+        `APKPure ↗️ <https://apkpure.com/>`_
 
     Attributes:
         base: The base apk file.
@@ -129,9 +128,10 @@ class XAPKFile:
         if not extract_path:
             self._package_name = info['package_name']
             self._version_code = info['version_code']
-            self._version_name = info['version_name']
-            self._min_sdk_version = info['min_sdk_version']
-            self._target_sdk_version = info['target_sdk_version']
+            self._version_name = info.get('version_name')
+            self._min_sdk_version = info.get('min_sdk_version')
+            self._target_sdk_version = info.get('target_sdk_version')
+            self._permissions = info.get('permissions', ())
 
         self._extract_path = extract_path or tempfile.mkdtemp()
         self._extracted = False
@@ -167,6 +167,34 @@ class XAPKFile:
         self._launchable_activity = self._base.launchable_activity
         self._densities = self._base.densities
         self._supports_any_density = self._base.supports_any_density
+
+    def install(
+            self,
+            upgrade: bool = False,
+            device_id: Optional[str] = None,
+            installer: Optional[str] = None,
+            originating_uri: Optional[str] = None,
+            adb_path: Optional[str] = None
+    ) -> None:
+        """
+        Install the xapk file.
+
+        Args:
+            upgrade: If True, the app will be upgraded if it is already installed.
+            device_id: The device id to install the app to.
+            installer: The installer package name.
+            originating_uri: The originating uri.
+            adb_path: Path to adb binary (if not in PATH).
+        """
+        self._extract()
+        install_apks(
+            apks=(self.base.path, *(split.path for split in self.splits)),
+            upgrade=upgrade,
+            device_id=device_id,
+            installer=installer,
+            originating_uri=originating_uri,
+            adb_path=adb_path
+        )
 
     def delete_extracted_files(self) -> None:
         """
@@ -283,4 +311,4 @@ class XAPKFile:
         return tuple(set(abi for split in self._splits for abi in split.abis) | set(self._base.abis))
 
     def __repr__(self):
-        return f"APKMFile(pkg='{self.package_name}', vcode={self.version_code})"
+        return f"XapkFile(pkg='{self.package_name}', vcode={self.version_code})"

@@ -5,18 +5,18 @@ import tempfile
 from typing import Tuple, Optional, Dict
 from zipfile import ZipFile
 from aapyt.apk import ApkFile
-from aapyt.utils import Abi, InstallLocation
+from aapyt.utils import Abi, InstallLocation, install_apks
 
 
-class APKMFile:
+class ApkmFile:
     """
     An object representing an apkm file.
 
-    An APKM file is an Android app bundle created for use with APKMirror Installer, an alternative Android app
+    From `fileinfo.com <https://fileinfo.com/extension/xapk>`_: An APKM file is an Android app bundle created for use with APKMirror Installer, an alternative Android app
     installer. It is similar to an .AAB file, in that it contains a number of .APK files used to install an Android
     app. APKM files, however, can be installed only using APKMirror Installer
-        `For more information ↗️ <https://fileinfo.com/extension/apkm>`_.
-        `APKMirror ↗️ <https://www.apkmirror.com/>`_.
+
+        `APKMirror ↗️ <https://www.apkmirror.com/>`_
 
     Attributes:
         base: The base apk file.
@@ -179,6 +179,35 @@ class APKMFile:
             return
         shutil.rmtree(self._extract_path)
 
+    def install(
+            self,
+            upgrade: bool = False,
+            device_id: Optional[str] = None,
+            installer: Optional[str] = None,
+            originating_uri: Optional[str] = None,
+            adb_path: Optional[str] = None
+    ) -> None:
+        """
+        Install the xapk file
+            - The files will be extr
+
+        Args:
+            upgrade: If True, the app will be upgraded if it is already installed.
+            device_id: The device id to install the app to.
+            installer: The installer package name.
+            originating_uri: The originating uri.
+            adb_path: Path to adb binary (if not in PATH).
+        """
+        self._extract()
+        install_apks(
+            apks=(self.base.path, *(split.path for split in self.splits)),
+            upgrade=upgrade,
+            device_id=device_id,
+            installer=installer,
+            originating_uri=originating_uri,
+            adb_path=adb_path
+        )
+
     @property
     def base(self) -> ApkFile:
         """Get the base apk file."""
@@ -285,4 +314,4 @@ class APKMFile:
         return tuple(set(abi for split in self._splits for abi in split.abis) | set(self._base.abis))
 
     def __repr__(self):
-        return f"APKMFile(pkg='{self.package_name}', vcode={self.version_code})"
+        return f"ApkmFile(pkg='{self.package_name}', vcode={self.version_code})"

@@ -4,7 +4,7 @@ import re
 import subprocess
 from typing import Optional, Dict, Tuple, Iterable, Any
 from zipfile import ZipFile
-from aapyt.utils import Abi, InstallLocation, get_raw_aapt
+from aapyt.utils import Abi, InstallLocation, get_raw_aapt, install_apks
 
 _extraction_patterns = {
     'package_name': r'package: name=\'([^\']+)\'',
@@ -199,15 +199,35 @@ class ApkFile:
         """
         self.as_zip_file().extractall(path=path, members=members)
 
-    def install(self, device_id: Optional[str] = None, adb_path: Optional[str] = None) -> None:
+    def install(
+            self,
+            upgrade: bool = False,
+            device_id: Optional[str] = None,
+            installer: Optional[str] = None,
+            originating_uri: Optional[str] = None,
+            adb_path: Optional[str] = None
+    ) -> None:
         """
-        Install the apk to a device.
+        Install the apk.
+
+            >>> apk_file.install(upgrade=True)
+            >>> apk_file.install(device_id='emulator-5554')
 
         Args:
-            device_id: The device to install the apk to.
+            upgrade: Whether to upgrade the app if it is already installed to avoid INSTALL_FAILED_ALREADY_EXISTS. (default: False)
+            device_id: The device id to install to. If not provided, the app will be installed to all devices.
+            installer: The installer package name. e.g. com.android.vending
+            originating_uri: The originating URI.
             adb_path: Path to adb binary (if not in PATH).
         """
-        subprocess.run([adb_path or 'adb', *(('-s', device_id) if device_id else ()), 'install', self.path], check=True)
+        install_apks(
+            apks=self._path,
+            upgrade=upgrade,
+            device_id=device_id,
+            installer=installer,
+            originating_uri=originating_uri,
+            adb_path=adb_path
+        )
 
     def __repr__(self):
         return f"ApkFile(pkg='{self.package_name}', vcode={self.version_code} is_split={self.is_split})"

@@ -1,13 +1,14 @@
 from datetime import datetime
 from aapyt.apk import ApkFile
-from aapyt.apkm import APKMFile
-from aapyt.xapk import XAPKFile
-from aapyt.utils import Abi, InstallLocation, get_raw_aapt
+from aapyt.apkm import ApkmFile
+from aapyt.xapk import XapkFile
+from aapyt.utils import Abi, InstallLocation, get_raw_aapt, install_apks
 
 
 __all__ = [
     'ApkFile',
-    'APKMFile',
+    'ApkmFile',
+    'XapkFile',
     'Abi',
     'InstallLocation',
     'get_raw_aapt',
