@@ -1,10 +1,234 @@
 import hashlib
 import os
-import re
+import shutil
 import subprocess
-from typing import Optional, Dict, Tuple, Iterable, Any
+import re
 from zipfile import ZipFile
-from aapyt.utils import Abi, InstallLocation, get_raw_aapt, install_apks
+from enum import Enum
+from typing import Optional, Tuple, Union, Iterable, Dict, Any
+
+
+__all__ = [
+    'ApkFile',
+    'install_apks',
+    'get_raw_aapt',
+    'Abi',
+    'InstallLocation'
+]
+
+
+def _get_program_path(program: str) -> str:
+    """
+    Helper function to get the path of a program.
+
+    Args:
+        program: The name of the program.
+    Returns:
+        The path to the program.
+    Raises:
+        FileNotFoundError: If the program is not in the PATH.
+    """
+    program_path = shutil.which(program)
+    if program_path is None:
+        raise FileNotFoundError
+    return program_path
+
+
+def get_raw_aapt(apk_path: str, aapt_path: Optional[str] = None) -> str:
+    """
+    Helper function to get the raw output of the aapt command.
+
+    Args:
+        apk_path: The path to the apk.
+        aapt_path: The path to the aapt executable (If not specified, aapt will be searched in the PATH).
+    Returns:
+        The raw output of the aapt command.
+    Raises:
+        FileNotFoundError: If aapt is not installed.
+        RuntimeError: If the aapt command failed.
+    """
+    try:
+        return subprocess.run(
+            [aapt_path or _get_program_path('aapt'), 'd', 'badging', apk_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True).stdout.decode('utf-8')
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(e.stderr.decode('utf-8'))
+    except FileNotFoundError as e:
+        raise FileNotFoundError('aapt is not installed') from e
+
+
+def _get_connected_devices(adb_path: Optional[str] = None) -> Tuple[str]:
+    """
+    Helper function to get the connected devices using adb.
+
+    Args:
+        adb_path: The path to the adb executable (If not specified, adb will be searched in the PATH).
+    Returns:
+        A tuple of the connected device ids.
+    """
+    try:
+        results = subprocess.run(
+            [adb_path or _get_program_path('adb'), 'devices'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True).stdout.decode('utf-8').strip().split("\n")[1:]
+        return tuple(line.split("\t")[0] for line in results if line.endswith('device'))
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(e.stderr.decode('utf-8'))
+
+
+def install_apks(
+        apks: Union[str, Iterable[str]],
+        check: bool = True,
+        upgrade: bool = False,
+        device_id: Optional[str] = None,
+        installer: Optional[str] = None,
+        originating_uri: Optional[str] = None,
+        adb_path: Optional[str] = None,
+        aapt_path: Optional[str] = None
+):
+    """
+    Install apk(s) on a device using `adb <https://developer.android.com/studio/command-line/adb>`_.
+
+    This function will take some time to run, depending on the size of the apk(s) and the speed of the device.
+
+    Args:
+        apks: The path to the apk or a list of paths to the apks.
+        check: Check if the app is compatible with the device (abi, minSdkVersion, etc.).
+        upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
+        device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
+        installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
+        originating_uri: The URI of the app that is performing the installation.
+        adb_path: The path to the adb executable (If not specified, adb will be searched in the ``PATH``).
+        aapt_path: The path to the aapt executable (If check is ``True``. If not specified, aapt will be searched in the ``PATH``).
+
+    Raises:
+        FileNotFoundError: If adb is not installed.
+        RuntimeError: If the adb command failed.
+    """
+    adb_path = adb_path or _get_program_path('adb')
+    devices = (device_id,) if device_id else _get_connected_devices(adb_path=adb_path)
+    spargs = {'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'check': True}
+    for device in devices:
+        cmd_args = (adb_path, '-s', device)
+        tmp_path = subprocess.run(
+            [*cmd_args, 'shell', 'mktemp', '-d', '--tmpdir=/data/local/tmp'], **spargs
+        ).stdout.decode('utf-8').strip()
+
+        if check:
+            device_abis = subprocess.run(
+                [*cmd_args, 'shell', 'getprop', 'ro.product.cpu.abilist'], **spargs
+            ).stdout.decode('utf-8').strip().split(',')
+            device_sdk = int(subprocess.run(
+                [*cmd_args, 'shell', 'getprop', 'ro.build.version.sdk'], **spargs
+            ).stdout.decode('utf-8').strip())
+            apk_objects = [ApkFile(path=apk, aapt_path=aapt_path) for apk in ([apks] if isinstance(apks, str) else apks)]
+            apks = {}
+            for apk in apk_objects:
+                if (apk.min_sdk_version is None or apk.min_sdk_version <= device_sdk) and \
+                     (not apk.abis or any(abi in device_abis for abi in apk.abis)):
+                    apks[shutil.os.path.abspath(apk.path)] = shutil.os.path.getsize(apk.path)
+        else:
+            apks = {
+                shutil.os.path.abspath(apk): shutil.os.path.getsize(apk)
+                for apk in ([apks] if isinstance(apks, str) else apks)
+            }
+
+        try:
+            subprocess.run([*cmd_args, 'push', *apks, tmp_path], **spargs)
+            session_id = re.search(r'[0-9]+', subprocess.run(
+                [*cmd_args, 'shell', 'pm', 'install-create',
+                 ('-r' if upgrade else ''), *(['-i', installer] if installer else []),
+                 *(['--originating-uri', originating_uri] if originating_uri else []),
+                 '-S', str(sum(apks.values()))], **spargs
+            ).stdout.decode('utf-8')).group(0)
+
+            for idx, (apk, size) in enumerate(apks.items()):
+                basename = shutil.os.path.basename(apk)
+                subprocess.run(
+                    [*cmd_args, 'shell', 'pm', 'install-write', '-S',
+                     str(size), session_id, str(idx), f'{tmp_path}/{basename}'], **spargs
+                )
+            subprocess.run([*cmd_args, 'shell', 'pm', 'install-commit', session_id], **spargs)
+
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to install apk on device {device}: {e.stderr.decode('utf-8')}") from e
+        finally:
+            subprocess.run([*cmd_args, 'shell', 'rm', '-rf', tmp_path], **spargs)
+
+
+class InstallLocation(Enum):
+    """
+    Where the application can be installed on external storage, internal only or auto.
+
+    See `Android documentation <https://developer.android.com/reference/android/content/pm/PackageInfo.html#installLocation>`_.
+
+    Attributes:
+        AUTO: Let the system decide where to install the app.
+        INTERNAL_ONLY: Install the app on internal storage only.
+        PREFER_EXTERNAL: Prefer external storage.
+    """
+    AUTO = 'auto'
+    INTERNAL_ONLY = 'internalOnly'
+    PREFER_EXTERNAL = 'preferExternal'
+
+    @classmethod
+    def _missing_(cls, value):
+        return cls.AUTO
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.value == other
+        return super().__eq__(other)
+
+    def __hash__(self):
+        return hash(self.value)
+
+    def __repr__(self):
+        return f'InstallLocation.{self.name}'
+
+
+class Abi(Enum):
+    """
+    Android supported ABIs.
+
+    See `Android documentation <https://developer.android.com/ndk/guides/abis>`_.
+
+    Attributes:
+        ARM: armeabi
+        ARM7: armeabi-v7a
+        ARM64: arm64-v8a
+        X86: x86
+        X86_64: x86_64
+        UNKNOWN: Unknown ABI
+    """
+    ARM = 'armeabi'
+    ARM7 = 'armeabi-v7a'
+    ARM64 = 'arm64-v8a'
+    X86 = 'x86'
+    X86_64 = 'x86_64'
+    UNKNOWN = 'unknown'
+
+    @classmethod
+    def all(cls) -> Tuple['Abi']:
+        """Returns all the supported ABIs."""
+        return tuple(a for a in cls if a != cls.UNKNOWN)
+
+    @classmethod
+    def _missing_(cls, value):
+        return cls.UNKNOWN
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.value == other
+        return super().__eq__(other)
+
+    def __hash__(self):
+        return hash(self.value)
+
+    def __repr__(self):
+        return f'Abi.{self.name}'
+
 
 _extraction_patterns = {
     'package_name': r'package: name=\'([^\']+)\'',
@@ -28,7 +252,84 @@ _extraction_patterns = {
 }
 
 
-class ApkFile:
+class _BaseApkFile:
+    package_name: str
+    version_code: int
+    version_name: Optional[str]
+    min_sdk_version: Optional[int]
+    target_sdk_version: Optional[int]
+    install_location: InstallLocation
+    labels: Dict[str, str]
+    permissions: Tuple[str]
+    libraries: Tuple[str]
+    features: Tuple[str]
+    launchable_activity: Optional[str]
+    supported_screens: Tuple[str]
+    supports_any_density: bool
+    langs: Tuple[str]
+    densities: Tuple[str]
+    abis: Tuple[Abi]
+    icons: Dict[int, str]
+    split_name: Optional[str]
+    path: Union[str, os.PathLike]
+    size: int
+    md5: str
+
+    @property
+    def size(self) -> int:
+        """Get the apk file size in bytes."""
+        return os.path.getsize(self.path)
+
+    @property
+    def md5(self) -> str:
+        """Get the apk file md5."""
+        return hashlib.md5(open(self.path, 'rb').read()).hexdigest()
+
+    def as_zip_file(self) -> ZipFile:
+        """Get the apk file as a zip file."""
+        return ZipFile(self.path)
+
+    def install(
+            self,
+            check: bool = True,
+            upgrade: bool = False,
+            device_id: Optional[str] = None,
+            installer: Optional[str] = None,
+            originating_uri: Optional[str] = None,
+            adb_path: Optional[str] = None,
+            aapt_path: Optional[str] = None
+    ):
+        """
+        Install the apk on the device.
+
+        Args:
+            check: Check if the app is compatible with the device (abi, minSdkVersion, etc).
+            upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
+            device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
+            installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
+            originating_uri: The URI of the app that is performing the installation.
+            adb_path: The path to the adb executable (If not specified, adb will be searched in the ``PATH``).
+            aapt_path: The path to the aapt executable (If check is ``True``. If not specified, aapt will be searched in the ``PATH``).
+
+        Raises:
+            FileNotFoundError: If adb is not installed.
+            RuntimeError: If the adb command failed.
+        """
+        install_apks(
+            apks=self.path,
+            check=check,
+            upgrade=upgrade,
+            device_id=device_id,
+            installer=installer,
+            originating_uri=originating_uri,
+            adb_path=adb_path
+        )
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(pkg='{self.package_name}', version={self.version_code})"
+
+
+class ApkFile(_BaseApkFile):
     """
     Represents the information of an Android app.
 
@@ -81,42 +382,20 @@ class ApkFile:
         path: The path to the apk file.
         size: The size of the apk file.
         md5: The MD5 hash of the apk file.
-
-    Methods:
-        as_zip_file: Returns the apk as a ZipFile.
-        extract: Extracts files from the apk.
-        install: Installs the apk with adb.
     """
-    package_name: str
-    version_code: int
-    version_name: Optional[str]
-    min_sdk_version: Optional[int]
-    target_sdk_version: Optional[int]
-    install_location: InstallLocation
-    labels: Dict[str, str]
-    permissions: Tuple[str]
-    libraries: Tuple[str]
-    features: Tuple[str]
-    launchable_activity: Optional[str]
-    supported_screens: Tuple[str]
-    supports_any_density: bool
-    langs: Tuple[str]
-    densities: Tuple[str]
-    abis: Tuple[Abi]
-    icons: Dict[int, str]
-    split_name: Optional[str]
     is_split: bool
     is_universal: bool
-    path: str
-    size: int
-    md5: str
 
-    def __init__(self, apk_path: str, aapt_path: Optional[str] = None):
+    def __init__(
+            self,
+            path: Union[str, os.PathLike],
+            aapt_path: Optional[Union[str, os.PathLike]] = None
+    ) -> None:
         """
         Initialize an ApkFile instance.
 
         Args:
-            apk_path: Path to the apk file. (e.g. '/path/to/app.apk')
+            path: Path to the apk file. (e.g. '/path/to/app.apk')
             aapt_path: Path to aapt binary (if not in PATH).
 
         Raises:
@@ -124,9 +403,9 @@ class ApkFile:
             FileExistsError: If apk file is not a valid apk file.
             RuntimeError: If aapt binary failed to run.
         """
-        self._path = apk_path
+        self.path = path
         try:
-            raw = get_raw_aapt(apk_path=self._path, aapt_path=aapt_path)
+            raw = get_raw_aapt(apk_path=self.path, aapt_path=aapt_path)
         except RuntimeError as e:
             err_msg = str(e)
             if 'Invalid file' in err_msg:
@@ -159,33 +438,14 @@ class ApkFile:
         self.icons = {int(size): icon for size, icon in data.get('icons', {})}
 
     @property
-    def path(self) -> str:
-        """Get the apk path."""
-        return self._path
-
-    @property
     def is_split(self) -> bool:
         """Check if the apk is a split apk."""
-        return self.split_name is not None
+        return self.split_name is not None if hasattr(self, 'split_name') else False
 
     @property
     def is_universal(self) -> bool:
         """Check if the apk is a universal apk."""
         return len(self.abis) == 0 or all(abi in self.abis for abi in Abi.all())
-
-    @property
-    def size(self) -> int:
-        """Get the apk file size in bytes."""
-        return os.path.getsize(self.path)
-
-    @property
-    def md5(self) -> str:
-        """Get the apk file md5."""
-        return hashlib.md5(open(self._path, 'rb').read()).hexdigest()
-
-    def as_zip_file(self) -> ZipFile:
-        """Get the apk file as a zip file."""
-        return ZipFile(self._path)
 
     def extract(self, path: str, members: Optional[Iterable[str]] = None) -> None:
         """
@@ -199,40 +459,8 @@ class ApkFile:
         """
         self.as_zip_file().extractall(path=path, members=members)
 
-    def install(
-            self,
-            upgrade: bool = False,
-            device_id: Optional[str] = None,
-            installer: Optional[str] = None,
-            originating_uri: Optional[str] = None,
-            adb_path: Optional[str] = None
-    ) -> None:
-        """
-        Install the apk.
-
-            >>> apk_file.install(upgrade=True)
-            >>> apk_file.install(device_id='emulator-5554')
-
-        Args:
-            upgrade: Whether to upgrade the app if it is already installed to avoid INSTALL_FAILED_ALREADY_EXISTS. (default: False)
-            device_id: The device id to install to. If not provided, the app will be installed to all devices.
-            installer: The installer package name. e.g. com.android.vending
-            originating_uri: The originating URI.
-            adb_path: Path to adb binary (if not in PATH).
-        """
-        install_apks(
-            apks=self._path,
-            upgrade=upgrade,
-            device_id=device_id,
-            installer=installer,
-            originating_uri=originating_uri,
-            adb_path=adb_path
-        )
-
-    def __repr__(self):
-        return f"ApkFile(pkg='{self.package_name}', vcode={self.version_code} is_split={self.is_split})"
-
     def as_dict(self) -> Dict[str, Any]:
-        return {k: v.as_dict() if hasattr(v, 'as_dict') else v
-                for k, v in self.__dict__.items() if not k.startswith('_')}
-
+        return {
+            k: v.as_dict() if hasattr(v, 'as_dict') else v
+            for k, v in self.__dict__.items() if not k.startswith('_')
+        }

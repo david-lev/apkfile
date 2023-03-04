@@ -1,14 +1,11 @@
 import json
 import os
-import shutil
 import tempfile
-from typing import Tuple, Optional, Dict
-from zipfile import ZipFile
-from aapyt.apk import ApkFile
-from aapyt.utils import Abi, InstallLocation, install_apks
+from typing import Optional, Union, Tuple
+from aapyt._base_zip import _BaseZipApkFile
 
 
-class XapkFile:
+class XapkFile(_BaseZipApkFile):
     """
     An object representing a xapk file.
 
@@ -62,37 +59,18 @@ class XapkFile:
         app_name: The name of the app (In APKPure, this is the name of the app in the xapk file).
 
     """
-    base: ApkFile
-    splits: Tuple[ApkFile]
-    icon: str
-    package_name: str
-    version_code: int
-    version_name: Optional[str]
-    min_sdk_version: Optional[int]
-    target_sdk_version: Optional[int]
-    install_location: InstallLocation
-    labels: Dict[str, str]
-    permissions: Tuple[str]
-    libraries: Tuple[str]
-    features: Tuple[str]
-    launchable_activity: Optional[str]
-    supported_screens: Tuple[str]
-    supports_any_density: bool
-    langs: Tuple[str]
-    densities: Tuple[str]
-    abis: Tuple[Abi]
-    icons: Dict[int, str]
     xapk_version: int
     app_name: str
 
     def __init__(
-            self, xapk_path: str,
-            extract_path: Optional[str] = None,
-            skip_broken_splits: bool = True,
-            aapt_path: Optional[str] = None
+            self,
+            path: Union[str, os.PathLike[str]],
+            extract_path: Optional[Union[str, os.PathLike[str]]] = None,
+            aapt_path: Optional[Union[str, os.PathLike[str]]] = None,
+            skip_broken_splits: bool = False
     ):
         """
-        Initialize an APKMFile instance.
+        Initialize an XapkFile instance.
 
         This will parse the xapk file and extract some basic information like package name, version code, etc.
         In default, the files in the xapk file will not be extracted. If you want to extract the files in order to
@@ -103,7 +81,7 @@ class XapkFile:
 
 
         Args:
-            xapk_path: Path to the xapk file.
+            path: Path to the xapk file.
             extract_path: Path to extract the files in the xapk file to. If not provided, the files will not be extracted.
             skip_broken_splits: If True, broken split apks will be skipped. If False, an exception will be raised.
             aapt_path: Path to aapt binary (if not in PATH).
@@ -113,202 +91,30 @@ class XapkFile:
             FileExistsError: If xapk file is not a valid xapk file (or when extracting files).
             RuntimeError: If aapt binary failed to run (When extracting files).
         """
-        self._path = xapk_path
-        self._aapt_path = aapt_path
-        self._skip_broken_splits = skip_broken_splits
-        self._file = ZipFile(self._path)
-        try:
-            with self._file.open('manifest.json') as f:
-                info = json.load(f)
-        except (KeyError, json.JSONDecodeError):
-            raise FileExistsError(f'Invalid xapk file: {self._path}')
 
-        self.app_name = info['name']
-        self.xapk_version = info['xapk_version']
-        if not extract_path:
-            self._package_name = info['package_name']
-            self._version_code = info['version_code']
-            self._version_name = info.get('version_name')
-            self._min_sdk_version = info.get('min_sdk_version')
-            self._target_sdk_version = info.get('target_sdk_version')
-            self._permissions = info.get('permissions', ())
-
-        self._extract_path = extract_path or tempfile.mkdtemp()
-        self._extracted = False
-        self._base = f'{self._package_name}.apk'
-        self._splits = list(filter(lambda x: x.endswith('.apk') and x != self._base, self._file.namelist()))
-        self._icon = 'icon.png'
-
-        if extract_path:
-            self._extract()
-
-    def _extract(self) -> None:
-        """Extract the xapk file to a directory."""
-        if self._extracted:
-            return
-        self._file.extractall(path=self._extract_path, members=(self._base, *self._splits, self._icon))
-        self._extracted = True
-        self._base = ApkFile(apk_path=os.path.join(self._extract_path, self._base), aapt_path=self._aapt_path)
-        splits = []
-        for split in self._splits:
-            try:
-                splits.append(ApkFile(apk_path=os.path.join(self._extract_path, split), aapt_path=self._aapt_path))
-            except RuntimeError:
-                if not self._skip_broken_splits:
-                    raise
-                os.unlink(os.path.join(self._extract_path, split))
-
-        self._package_name = self._base.package_name
-        self._version_code = self._base.version_code
-        self._version_name = self._base.version_name
-        self._splits = tuple(splits)
-        self._icon = os.path.join(self._extract_path, self._icon)
-        self._supported_screens = self._base.supported_screens
-        self._launchable_activity = self._base.launchable_activity
-        self._densities = self._base.densities
-        self._supports_any_density = self._base.supports_any_density
-
-    def install(
-            self,
-            upgrade: bool = False,
-            device_id: Optional[str] = None,
-            installer: Optional[str] = None,
-            originating_uri: Optional[str] = None,
-            adb_path: Optional[str] = None
-    ) -> None:
-        """
-        Install the xapk file.
-
-        Args:
-            upgrade: If True, the app will be upgraded if it is already installed.
-            device_id: The device id to install the app to.
-            installer: The installer package name.
-            originating_uri: The originating uri.
-            adb_path: Path to adb binary (if not in PATH).
-        """
-        self._extract()
-        install_apks(
-            apks=(self.base.path, *(split.path for split in self.splits)),
-            upgrade=upgrade,
-            device_id=device_id,
-            installer=installer,
-            originating_uri=originating_uri,
-            adb_path=adb_path
+        super().__init__(
+            path=path,
+            manifest_json_path='manifest.json',
+            base_apk_path='{package_name}.apk',
+            extract_path=extract_path,
+            aapt_path=aapt_path,
+            skip_broken_splits=skip_broken_splits
         )
 
-    def delete_extracted_files(self) -> None:
-        """
-        Delete the extracted files, Use this if you don't need the extracted files anymore.
-            - This will not delete the xapk file, only the extracted files
-            - The data will be remained in the object
-        """
-        if not self._extracted:
-            return
-        shutil.rmtree(self._extract_path)
+        self.app_name = self._info['name']
+        self.xapk_version = self._info['xapk_version']
+        if not extract_path:
+            self.package_name = self._info['package_name']
+            self.version_code = int(self._info['version_code'])
+            self.version_name = self._info.get('version_name')
+            self.min_sdk_version = int(self._info['min_sdk_version'])
+            self.target_sdk_version = int(self._info['target_sdk_version']) if 'target_sdk_version' in self._info else None
+            self.permissions = self._info.get('permissions', ())
+        else:
+            self._extract()
 
-    @property
-    def base(self) -> ApkFile:
-        """Get the base apk file."""
-        self._extract()
-        return self._base
-
-    @property
-    def splits(self) -> Tuple[ApkFile]:
-        """Get the split apk files."""
-        self._extract()
-        return self._splits
-
-    @property
-    def package_name(self) -> str:
-        """Get the package name."""
-        return self._package_name
-
-    @property
-    def version_code(self) -> int:
-        """Get the version code."""
-        return self._version_code
-
-    @property
-    def version_name(self) -> str:
-        """Get the version name."""
-        return self._version_name
-
-    @property
-    def icon(self) -> str:
-        """Get the icon file path."""
-        self._extract()
-        return self._icon
-
-    @property
-    def min_sdk_version(self) -> int:
-        """Get the min sdk version."""
-        return self._min_sdk_version
-
-    @property
-    def target_sdk_version(self) -> int:
-        """Get the target sdk version."""
-        return self._target_sdk_version
-
-    @property
-    def permissions(self) -> Tuple[str]:
-        """Get the permissions."""
-        self._extract()
-        return tuple(set(p for split in self._splits for p in split.permissions) | set(self._base.permissions))
-
-    @property
-    def features(self) -> Tuple[str]:
-        """Get the features."""
-        self._extract()
-        return tuple(set(f for split in self._splits for f in split.features) | set(self._base.features))
-
-    @property
-    def libraries(self) -> Tuple[str]:
-        """Get the libraries."""
-        self._extract()
-        return tuple(set(l for split in self._splits for l in split.libraries) | set(self._base.libraries))
-
-    @property
-    def supported_screens(self) -> Tuple[str]:
-        """Get the supported screens."""
-        self._extract()
-        return self._supported_screens
-
-    @property
-    def launchable_activity(self) -> str:
-        """Get the launchable activity."""
-        self._extract()
-        return self._launchable_activity
-
-    @property
-    def labels(self) -> Dict[str, str]:
-        """Get the labels."""
-        self._extract()
-        return {k: v for labels in [split.labels for split in self._splits]
-                + [self._base.labels] for k, v in labels.items()}
-
-    @property
-    def densities(self) -> Tuple[str]:
-        """Get the densities."""
-        self._extract()
-        return self._densities
-
-    @property
-    def supports_any_density(self) -> bool:
-        """Get whether the app supports any density."""
-        self._extract()
-        return self._supports_any_density
-
-    @property
-    def langs(self) -> Tuple[str]:
-        """Get the locals."""
-        self._extract()
-        return tuple(set(lang for split in self._splits for lang in split.langs) | set(self._base.langs))
-
-    @property
-    def abis(self) -> Tuple[Abi]:
-        """Get the abis."""
-        self._extract()
-        return tuple(set(abi for split in self._splits for abi in split.abis) | set(self._base.abis))
-
-    def __repr__(self):
-        return f"XapkFile(pkg='{self.package_name}', vcode={self.version_code})"
+    def __getattribute__(self, item):  # override target_sdk_version and permissions
+        if item in ('base', 'splits', 'icon', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
+                    'launchable_activity', 'densities', 'supports_any_density'):
+            self._extract()
+        return super().__getattribute__(item)

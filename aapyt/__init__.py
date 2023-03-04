@@ -1,8 +1,7 @@
 from datetime import datetime
-from aapyt.apk import ApkFile
+from aapyt.apk import ApkFile, Abi, InstallLocation, get_raw_aapt, install_apks
 from aapyt.apkm import ApkmFile
 from aapyt.xapk import XapkFile
-from aapyt.utils import Abi, InstallLocation, get_raw_aapt, install_apks
 
 
 __all__ = [
