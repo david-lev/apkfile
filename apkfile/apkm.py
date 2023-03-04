@@ -1,6 +1,6 @@
 import os
 from typing import Optional, Union
-from aapyt._base_zip import _BaseZipApkFile
+from apkfile._zip_apk import _BaseZipApkFile
 
 
 class ApkmFile(_BaseZipApkFile):

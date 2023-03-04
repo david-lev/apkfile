@@ -1,8 +1,6 @@
-import json
 import os
-import tempfile
-from typing import Optional, Union, Tuple
-from aapyt._base_zip import _BaseZipApkFile
+from typing import Optional, Union
+from apkfile._zip_apk import _BaseZipApkFile
 
 
 class XapkFile(_BaseZipApkFile):

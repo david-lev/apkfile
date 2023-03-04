@@ -116,9 +116,9 @@ def install_apks(
         ).stdout.decode('utf-8').strip()
 
         if check:
-            device_abis = subprocess.run(
+            device_abis = (Abi(abi) for abi in subprocess.run(
                 [*cmd_args, 'shell', 'getprop', 'ro.product.cpu.abilist'], **spargs
-            ).stdout.decode('utf-8').strip().split(',')
+            ).stdout.decode('utf-8').strip().split(','))
             device_sdk = int(subprocess.run(
                 [*cmd_args, 'shell', 'getprop', 'ro.build.version.sdk'], **spargs
             ).stdout.decode('utf-8').strip())
@@ -126,7 +126,8 @@ def install_apks(
             apks = {}
             for apk in apk_objects:
                 if (apk.min_sdk_version is None or apk.min_sdk_version <= device_sdk) and \
-                     (not apk.abis or any(abi in device_abis for abi in apk.abis)):
+                     (not apk.abis or
+                      any(device_abi.is_compatible_with(apk_abi) for apk_abi in apk.abis for device_abi in device_abis)):
                     apks[shutil.os.path.abspath(apk.path)] = shutil.os.path.getsize(apk.path)
         else:
             apks = {
@@ -209,6 +210,12 @@ class Abi(Enum):
     X86_64 = 'x86_64'
     UNKNOWN = 'unknown'
 
+    def is_compatible_with(self, other: 'Abi') -> bool:
+        """Returns whether this ABI is compatible with the other ABI."""
+        if self == other:
+            return True
+        return other in _compatibility_map[self]
+
     @classmethod
     def all(cls) -> Tuple['Abi']:
         """Returns all the supported ABIs."""
@@ -228,6 +235,16 @@ class Abi(Enum):
 
     def __repr__(self):
         return f'Abi.{self.name}'
+
+
+_compatibility_map = {
+    Abi.X86_64: frozenset({Abi.X86, Abi.ARM64,Abi.ARM7, Abi.ARM}),
+    Abi.X86: frozenset({Abi.ARM64, Abi.ARM7, Abi.ARM}),
+    Abi.ARM64: frozenset({Abi.ARM7, Abi.ARM}),
+    Abi.ARM7: frozenset({Abi.ARM}),
+    Abi.ARM: frozenset(),
+    Abi.UNKNOWN: frozenset(),
+}
 
 
 _extraction_patterns = {
@@ -403,13 +420,15 @@ class ApkFile(_BaseApkFile):
             FileExistsError: If apk file is not a valid apk file.
             RuntimeError: If aapt binary failed to run.
         """
+        if isinstance(path, os.PathLike):
+            path = os.fspath(path)
         self.path = path
         try:
             raw = get_raw_aapt(apk_path=self.path, aapt_path=aapt_path)
         except RuntimeError as e:
             err_msg = str(e)
-            if 'Invalid file' in err_msg:
-                raise FileExistsError(err_msg)
+            if any(x in err_msg for x in ('Invalid file', 'AndroidManifest.xml')):
+                raise FileExistsError(f"'{self.path}' is not a valid apk file.\nAAPT error: {err_msg}")
             elif 'is neither a directory nor file' in err_msg:
                 raise FileNotFoundError(err_msg)
             raise

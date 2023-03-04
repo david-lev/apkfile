@@ -4,7 +4,7 @@ import shutil
 import tempfile
 from typing import Tuple, Optional, Union
 from zipfile import ZipFile
-from aapyt.apk import _BaseApkFile, ApkFile, install_apks
+from apkfile.apk import _BaseApkFile, ApkFile, install_apks
 
 
 class _BaseZipApkFile(_BaseApkFile):
