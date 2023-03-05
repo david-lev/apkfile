@@ -13,8 +13,17 @@ setup(
         "Documentation": "https://github.com/david-lev/apkfile#readme",
         "Issue Tracker": "https://github.com/david-lev/apkfile/issues",
         "Source Code": "https://github.com/david-lev/apkfile",
+        "Funding": "https://github.com/sponsors/david-lev"
     },
     download_url="https://pypi.org/project/apkfile/",
     author='David Lev',
     license='MIT',
+    keywords='apk, aapt, apkfile, apks, apkm, xapk',
+    classifiers=[
+        'Development Status :: 5 - Production/Stable',
+        'Intended Audience :: Developers',
+        'Topic :: Utilities',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: OS Independent',
+    ],
 )

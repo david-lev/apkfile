@@ -23,7 +23,7 @@ __all__ = [
 __copyright__ = f'Copyright {datetime.now().year} david-lev'
 __license__ = 'MIT'
 __title__ = 'apkfile'
-__version__ = '0.1.1'
+__version__ = '0.1.2'
 
 
 def _get_program_path(program: str) -> str:
@@ -112,12 +112,22 @@ def install_apks(
         aapt_path: The path to the aapt executable (If check is ``True``. If not specified, aapt will be searched in the ``PATH``).
 
     Raises:
-        FileNotFoundError: If adb is not installed.
+        FileNotFoundError: If adb is not installed (or if ``check`` is ``True`` and aapt is not installed or the file does not exist).
         RuntimeError: If the adb command failed.
     """
-    adb_path = adb_path or _get_program_path('adb')
-    devices = (device_id,) if device_id else _get_connected_devices(adb_path=adb_path)
+    try:
+        adb_path = adb_path or _get_program_path('adb')
+    except FileNotFoundError:
+        raise FileNotFoundError('adb is not installed! see https://developer.android.com/studio/command-line/adb')
+
     spargs = {'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'check': True}
+    if device_id is None:
+        devices = tuple(line.split("\t")[0] for line in subprocess.run(
+            [adb_path, 'devices'], **spargs
+        ).stdout.decode('utf-8').strip().split("\n")[1:] if line.endswith('device'))
+    else:
+        devices = (device_id,)
+
     for device in devices:
         cmd_args = (adb_path, '-s', device)
         tmp_path = subprocess.run(
@@ -326,10 +336,13 @@ class _BaseApkFile:
             aapt_path: Optional[str] = None
     ):
         """
-        Install the apk on the device.
+        Install apk(s) on a device using `adb <https://developer.android.com/studio/command-line/adb>`_.
+
+        This function will take some time to run, depending on the size of the apk(s) and the speed of the device.
 
         Args:
-            check: Check if the app is compatible with the device (abi, minSdkVersion, etc).
+            apks: The path to the apk or a list of paths to the apks.
+            check: Check if the app is compatible with the device (abi, minSdkVersion, etc.).
             upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
             device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
             installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
@@ -338,7 +351,7 @@ class _BaseApkFile:
             aapt_path: The path to the aapt executable (If check is ``True``. If not specified, aapt will be searched in the ``PATH``).
 
         Raises:
-            FileNotFoundError: If adb is not installed.
+            FileNotFoundError: If adb is not installed (or if ``check`` is ``True`` and aapt is not installed or the file does not exist).
             RuntimeError: If the adb command failed.
         """
         install_apks(
@@ -543,7 +556,7 @@ class _BaseZipApkFile(_BaseApkFile):
         self.delete_extracted_files()
 
     def _extract(self) -> None:
-        """Extract the apkm file to a directory."""
+        """Extract the files"""
         if self._extracted:
             return
         self._zipfile.extractall(path=self._extract_path,
@@ -570,7 +583,7 @@ class _BaseZipApkFile(_BaseApkFile):
         self.permissions = tuple(
             set(p for split in self.splits for p in split.permissions) | set(self.base.permissions))
         self.features = tuple(set(f for split in self.splits for f in split.features) | set(self.base.features))
-        self.libraries = tuple(set(l for split in self.splits for l in split.libraries) | set(self.base.libraries))
+        self.libraries = tuple(set(x for split in self.splits for x in split.libraries) | set(self.base.libraries))
         self.labels = {k: v for labels in [split.labels for split in self.splits]
                        + [self.base.labels] for k, v in labels.items()}
         self.langs = tuple(set(lang for split in self.splits for lang in split.langs) | set(self.base.langs))
@@ -580,17 +593,17 @@ class _BaseZipApkFile(_BaseApkFile):
         self.supports_any_density = self.base.supports_any_density
 
     def __getattribute__(self, item):
-        """Extract the apkm file to a directory if needed."""
-        if item in ('base', 'splits', 'icon', 'target_sdk_version',
-                    'permissions', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
-                    'launchable_activity', 'densities', 'supports_any_density'):
-            self._extract()
+        """
+        Override the attribute getter to extract the files if needed
+
+        >>> if item in ('base', 'splits', 'icon', 'app_name'): self._extract()
+        """
         return super().__getattribute__(item)
 
     def delete_extracted_files(self) -> None:
         """
-        Delete the extracted files, Use this if you don't need the extracted files anymore.
-            - This will not delete the apkm file, only the extracted files
+        Delete the extracted files.
+            - This will not delete the zip file, only the extracted files
             - The data will be remained in the object
         """
         if not self._extracted:
@@ -615,7 +628,8 @@ class _BaseZipApkFile(_BaseApkFile):
             device_id=device_id,
             installer=installer,
             originating_uri=originating_uri,
-            adb_path=adb_path
+            adb_path=adb_path,
+            aapt_path=aapt_path
         )
         if delete_after_install:
             self.delete_extracted_files()
@@ -670,7 +684,7 @@ class ApkmFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/ndk/guides/abis>`_
         icons: Path's to the app icons.
             `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
-        apk_name: The name of the app (from APKMirror).
+        app_name: The name of the app (from APKMirror).
         apkm_version: The version of the apkm file.
 
     """
@@ -728,6 +742,13 @@ class ApkmFile(_BaseZipApkFile):
             self.min_sdk_version = self._info['min_api']
         else:
             self._extract()
+
+    def __getattribute__(self, item):
+        if item in ('base', 'splits', 'icon', 'target_sdk_version',
+                    'permissions', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
+                    'launchable_activity', 'densities', 'supports_any_density'):
+            self._extract()
+        return super().__getattribute__(item)
 
 
 class XapkFile(_BaseZipApkFile):
@@ -843,7 +864,7 @@ class XapkFile(_BaseZipApkFile):
         else:
             self._extract()
 
-    def __getattribute__(self, item):  # override target_sdk_version and permissions
+    def __getattribute__(self, item):
         if item in ('base', 'splits', 'icon', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
                     'launchable_activity', 'densities', 'supports_any_density'):
             self._extract()
@@ -953,8 +974,8 @@ class ApksFile(_BaseZipApkFile):
             super().__init__(manifest_json_path='meta.sai_v2.json', **kwargs)
             self.meta_version = self._info['meta_version']
             if not extract_path:
-                self.min_sdk_version = int(self._info['min_sdk'])
-                self.target_sdk_version = self._info.get('target_sdk')
+                self.min_sdk_version = self._info['min_sdk']
+                self.target_sdk_version = self._info['target_sdk']
         except FileExistsError:
             super().__init__(manifest_json_path='meta.sai_v1.json', **kwargs)
             self.meta_version = 1
@@ -968,7 +989,6 @@ class ApksFile(_BaseZipApkFile):
             self._extract()
 
     def __getattribute__(self, item):
-        """Override __getattribute__ to extract files if needed."""
         if (item in ('min_sdk_version', 'target_sdk_version') and super().__getattribute__('meta_version') < 2) \
                 or item in ('base', 'splits', 'icon', 'features', 'permissions', 'libraries', 'labels', 'langs',
                             'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'):

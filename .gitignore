@@ -1,5 +1,6 @@
 __pycache__
 .idea
 dist
-aapyt.egg-info
+apkfile.egg-info
 build
+*apk
