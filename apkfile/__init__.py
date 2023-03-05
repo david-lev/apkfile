@@ -23,7 +23,7 @@ __all__ = [
 __copyright__ = f'Copyright {datetime.now().year} david-lev'
 __license__ = 'MIT'
 __title__ = 'apkfile'
-__version__ = '0.1.2'
+__version__ = '0.1.3'
 
 
 def _get_program_path(program: str) -> str:
@@ -65,25 +65,6 @@ def get_raw_aapt(apk_path: str, aapt_path: Optional[str] = None) -> str:
         raise RuntimeError(e.stderr.decode('utf-8'))
     except FileNotFoundError as e:
         raise FileNotFoundError('aapt is not installed! see https://github.com/david-lev/apkfile#install-aapt')
-
-
-def _get_connected_devices(adb_path: Optional[str] = None) -> Tuple[str]:
-    """
-    Helper function to get the connected devices using adb.
-
-    Args:
-        adb_path: The path to the adb executable (If not specified, adb will be searched in the PATH).
-    Returns:
-        A tuple of the connected device ids.
-    """
-    try:
-        results = subprocess.run(
-            [adb_path or _get_program_path('adb'), 'devices'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            check=True).stdout.decode('utf-8').strip().split("\n")[1:]
-        return tuple(line.split("\t")[0] for line in results if line.endswith('device'))
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(e.stderr.decode('utf-8'))
 
 
 def install_apks(
@@ -307,9 +288,10 @@ class _BaseApkFile:
     densities: Tuple[str]
     abis: Tuple[Abi]
     icons: Dict[int, str]
-    path: Union[str, os.PathLike]
+    path: Union[str]
     size: int
     md5: str
+    sha256: str
 
     @property
     def size(self) -> int:
@@ -320,6 +302,11 @@ class _BaseApkFile:
     def md5(self) -> str:
         """Get the apk file md5."""
         return hashlib.md5(open(self.path, 'rb').read()).hexdigest()
+
+    @property
+    def sha256(self) -> str:
+        """Get the apk file sha256."""
+        return hashlib.sha256(open(self.path, 'rb').read()).hexdigest()
 
     def as_zip_file(self) -> ZipFile:
         """Get the apk file as a zip file."""
@@ -341,7 +328,6 @@ class _BaseApkFile:
         This function will take some time to run, depending on the size of the apk(s) and the speed of the device.
 
         Args:
-            apks: The path to the apk or a list of paths to the apks.
             check: Check if the app is compatible with the device (abi, minSdkVersion, etc.).
             upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
             device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
@@ -370,12 +356,9 @@ class _BaseApkFile:
 
 class ApkFile(_BaseApkFile):
     """
-    Represents the information of an Android app.
-
-    An APK file is an app created for Android, Google's mobile operating system. Some apps come pre-installed on Android
+    From `fileinfo.com <https://fileinfo.com/extension/apk>`_: An APK file is an app created for Android, Google's mobile operating system. Some apps come pre-installed on Android
     devices, while other apps can be downloaded from Google Play. Apps downloaded from Google Play are automatically
     installed on your device, while those downloaded from other sources must be installed manually.
-        `For more information ↗️ <https://fileinfo.com/extension/apk>`_.
         `APK in Wikipedia ↗️ <https://en.wikipedia.org/wiki/Apk_(file_format)>`_.
 
     Attributes:
@@ -421,6 +404,7 @@ class ApkFile(_BaseApkFile):
         path: The path to the apk file.
         size: The size of the apk file.
         md5: The MD5 hash of the apk file.
+        sha256: The SHA256 hash of the apk file.
     """
     split_name: Optional[str]
     is_split: bool
@@ -575,11 +559,10 @@ class _BaseZipApkFile(_BaseApkFile):
                 os.unlink(os.path.join(self._extract_path, split))
 
         self.splits = tuple(splits)
-        self.package_name = self.base.package_name
-        self.version_code = self.base.version_code
-        self.version_name = self.base.version_name
-        self.min_sdk_version = self.base.min_sdk_version
-        self.target_sdk_version = self.base.target_sdk_version
+        for attr in ('package_name', 'version_code', 'version_name', 'min_sdk_version', 'target_sdk_version',
+                     'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'):
+            setattr(self, attr, getattr(self.base, attr))
+
         self.permissions = tuple(
             set(p for split in self.splits for p in split.permissions) | set(self.base.permissions))
         self.features = tuple(set(f for split in self.splits for f in split.features) | set(self.base.features))
@@ -587,10 +570,6 @@ class _BaseZipApkFile(_BaseApkFile):
         self.labels = {k: v for labels in [split.labels for split in self.splits]
                        + [self.base.labels] for k, v in labels.items()}
         self.langs = tuple(set(lang for split in self.splits for lang in split.langs) | set(self.base.langs))
-        self.supported_screens = self.base.supported_screens
-        self.launchable_activity = self.base.launchable_activity
-        self.densities = self.base.densities
-        self.supports_any_density = self.base.supports_any_density
 
     def __getattribute__(self, item):
         """
@@ -637,11 +616,9 @@ class _BaseZipApkFile(_BaseApkFile):
 
 class ApkmFile(_BaseZipApkFile):
     """
-    An object representing an apkm file.
-
     From `fileinfo.com <https://fileinfo.com/extension/xapk>`_: An APKM file is an Android app bundle created for use with APKMirror Installer, an alternative Android app
     installer. It is similar to an .AAB file, in that it contains a number of .APK files used to install an Android
-    app. APKM files, however, can be installed only using APKMirror Installer
+    app. APKM files, however, can be installed only using APKMirror Installer.
 
         `APKMirror ↗️ <https://www.apkmirror.com/>`_
 
@@ -686,7 +663,10 @@ class ApkmFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
         app_name: The name of the app (from APKMirror).
         apkm_version: The version of the apkm file.
-
+        path: The path to the apk file.
+        size: The size of the apk file.
+        md5: The MD5 hash of the apk file.
+        sha256: The SHA256 hash of the apk file.
     """
     apkm_version: int
 
@@ -753,8 +733,6 @@ class ApkmFile(_BaseZipApkFile):
 
 class XapkFile(_BaseZipApkFile):
     """
-    An object representing a xapk file.
-
     From `fileinfo.com <https://fileinfo.com/extension/xapk>`_: An ``XAPK`` file is a package used to install Android
     apps on mobile devices. It is similar to the standard .APK format, but may contain other assets used by the app,
     such as an .OBB file, which stores graphics, media files, and other app data. XAPK files are used for distributing
@@ -802,7 +780,10 @@ class XapkFile(_BaseZipApkFile):
 
         xapk_version: The version of the xapk file.
         app_name: The name of the app (In APKPure, this is the name of the app in the xapk file).
-
+        path: The path to the apk file.
+        size: The size of the apk file.
+        md5: The MD5 hash of the apk file.
+        sha256: The SHA256 hash of the apk file.
     """
     xapk_version: int
 
@@ -873,8 +854,6 @@ class XapkFile(_BaseZipApkFile):
 
 class ApksFile(_BaseZipApkFile):
     """
-    An object representing a apks file.
-
     From `fileinfo.com <https://fileinfo.com/extension/apks>`_: An APKS file is an APK set archive generated by
     bundletool, a utility used for creating and managing Android App Bundles (.AAB files). The archive, which is a
     compressed .ZIP file, contains a set of .APK files that are split based on device characteristics such as
@@ -923,10 +902,12 @@ class ApksFile(_BaseZipApkFile):
 
         meta_version: The version of the apks file.
         app_name: The name of the app (From SAI).
-
+        path: The path to the apk file.
+        size: The size of the apk file.
+        md5: The MD5 hash of the apk file.
+        sha256: The SHA256 hash of the apk file.
     """
     meta_version: int
-    app_name: str
 
     def __init__(
             self,
