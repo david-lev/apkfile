@@ -1,5 +1,6 @@
 # ⛏️ [apkfile](https://github.com/david-lev/apkfile) • Python wrapper for aapt
 [![CodeFactor](https://www.codefactor.io/repository/github/david-lev/apkfile/badge)](https://www.codefactor.io/repository/github/david-lev/apkfile)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/apkfile?style=flat-square)](https://badge.fury.io/py/apkfile)
 [![PyPI Version](https://badge.fury.io/py/apkfile.svg)](https://pypi.org/project/apkfile/)
 
 **apkfile** is a Python library that extracts information from ``.APK``, ``.APKM``, ``.XAPK``, and ``.APKS`` files using [``aapt``](https://elinux.org/Android_aapt). It provides additional metadata beyond what's available in the ``AndroidManifest.xml`` file, such as the abis, minSdkVersion, targetSdkVersion, and more.
