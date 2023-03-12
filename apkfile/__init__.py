@@ -130,8 +130,7 @@ def install_apks(
 
             all_apk_objects = tuple(ApkFile(path=apk, aapt_path=aapt_path) for apk in
                                     ((apks,) if isinstance(apks, str) else apks))
-            langs = tuple(filter(lambda apk: apk.is_split and len(apk.langs) == 1 and
-                                             apk.langs[0] == apk.split_name.split('.')[-1], all_apk_objects))
+            langs = tuple(filter(lambda apk: apk.is_language_split, all_apk_objects))
             apk_objects = filter(lambda apk: apk not in langs, all_apk_objects)
 
             apks = {}
@@ -446,6 +445,7 @@ class ApkFile(_BaseApkFile):
             `↗️ <https://developer.android.com/studio/build/configure-apk-splits.html>`_
 
         is_split: Whether the apk is a split apk.
+        is_language_split: Whether the apk is a language split apk.
         path: The path to the apk file.
         size: The size of the apk file.
         md5: The MD5 hash of the apk file.
@@ -453,6 +453,7 @@ class ApkFile(_BaseApkFile):
     """
     split_name: Optional[str]
     is_split: bool
+    is_language_split: bool
 
     def __init__(
             self,
@@ -516,6 +517,11 @@ class ApkFile(_BaseApkFile):
     def is_split(self) -> bool:
         """Check if the apk is a split apk."""
         return self.split_name is not None
+
+    @property
+    def is_language_split(self) -> bool:
+        """Check if the apk is a language split apk."""
+        return self.is_split and len(self.langs) == 1 and self.langs[0] == self.split_name.split('.')[-1]
 
     def extract(self, path: str, members: Optional[Iterable[str]] = None) -> None:
         """

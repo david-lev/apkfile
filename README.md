@@ -5,7 +5,7 @@
 
 ### How this library works?
 This library uses [``aapt``](https://elinux.org/Android_aapt) to extract information from the `.APK` file, and then parses the output to get the information.
-- For `.APKM`, `.XAPK`, and `.APKS` files, the basic information (`package_name`, `version_name`, `version_code`, etc.) is derived the manifest file, and the rest of the information is extracted when it requested (lazy evaluation).
+- For `.APKM`, `.XAPK`, and `.APKS` files, the basic information (`package_name`, `version_name`, `version_code`, etc.) is derived from the .json file, and the rest of the information is extracted when it requested (lazy evaluation).
 - The library also provide ways to install the files (and check compatibility; `min_sdk_version` and `abis`) using [``adb``](https://developer.android.com/studio/command-line/adb).
 
 
