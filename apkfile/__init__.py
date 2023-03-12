@@ -130,7 +130,7 @@ def install_apks(
             all_apk_objects = tuple(ApkFile(path=apk, aapt_path=aapt_path) for apk in
                                     ((apks,) if isinstance(apks, str) else apks))
             langs = tuple(filter(lambda apk: apk.is_split and len(apk.langs) == 1 and
-                                 apk.langs[0] == apk.split_name.split('.')[-1], all_apk_objects))
+                                             apk.langs[0] == apk.split_name.split('.')[-1], all_apk_objects))
             apk_objects = filter(lambda apk: apk not in langs, all_apk_objects)
 
             apks = {}
@@ -138,7 +138,7 @@ def install_apks(
             for apk in apk_objects:
                 if (apk.min_sdk_version is None or apk.min_sdk_version <= device_sdk) and \
                         (not apk.abis or any(device_abi.is_compatible_with(apk_abi) for apk_abi in
-                         apk.abis for device_abi in device_abis)):
+                                             apk.abis for device_abi in device_abis)):
                     apks[os.path.abspath(apk.path)] = os.path.getsize(apk.path)
                     apks_added += 1
             if not apks_added:
@@ -157,8 +157,6 @@ def install_apks(
                 os.path.abspath(apk): os.path.getsize(apk)
                 for apk in ((apks,) if isinstance(apks, str) else apks)
             }
-
-        print(apks)
 
         try:
             subprocess.run((*adb_args, 'push', *apks, tmp_path), **spargs)
@@ -564,9 +562,7 @@ class _BaseZipApkFile(_BaseApkFile):
             base_apk_path: str,
             icon_path: str,
             extract_condition: Callable[[Any, str], bool],
-            manifest_attrs_always: Dict[str, (str, type)],
-            manifest_attrs_required: Optional[Dict[str, (str, type)]] = None,
-            manifest_attrs_optionals: Optional[Dict[str, (str, type)]] = None,
+            manifest_attrs: Optional[Dict[str, (str, type, bool)]] = None,
             extract_path: Optional[Union[str, os.PathLike[str]]] = None,
             aapt_path: Optional[Union[str, os.PathLike[str]]] = None,
             skip_broken_splits: bool = False
@@ -579,9 +575,7 @@ class _BaseZipApkFile(_BaseApkFile):
             manifest_json_path: Path to the json file containing the apk info.
             base_apk_path: Relative path to the base apk file in the archive. (Can contain format strings)
             icon_path: Relative path to the icon file in the archive. (Can contain format strings)
-            manifest_attrs_always: A dict of attributes to always extract from the manifest. The key is the attribute name and the value is the key in the manifest.
-            manifest_attrs_required: A dict of required attributes to extract from the manifest if ``extract_path`` not provided. The key is the attribute name and the value is the key in the manifest.
-            manifest_attrs_optionals: A dict of optional attributes to extract from the manifest if ``extract_path`` not provided. The key is the attribute name and the value is the key in the manifest.
+            manifest_attrs: A dict of attributes to extract from the manifest ``{attr: (key, type, is_required)}``
             extract_path: Path to extract the apk to. If not provided, a temporary directory will be created. (Can contain format strings)
             extract_condition: A callable that takes the instance and the item name and returns a boolean if the files should be extracted.  The callable signature: ``(self, item_name) -> bool``
             aapt_path: Path to the aapt binary.
@@ -595,8 +589,10 @@ class _BaseZipApkFile(_BaseApkFile):
             with self._zipfile.open(manifest_json_path) as f:
                 info = json.load(f)
                 self._base_path = base_apk_path.format(**info)
-                for attr, (key, typ) in manifest_attrs_always.items():
-                    setattr(self, attr, typ(info[key]))
+                if manifest_attrs is not None:
+                    for attr, (key, typ, required) in manifest_attrs.items():
+                        setattr(self, attr, (typ(info[key]) if required else
+                                             (typ(info.get(key)) if key in info else None)))
         except (KeyError, json.JSONDecodeError) as e:
             raise FileExistsError(f'Invalid file: {self.path}') from e
 
@@ -609,13 +605,6 @@ class _BaseZipApkFile(_BaseApkFile):
 
         if extract_path:
             self._extract()
-        else:
-            if manifest_attrs_required is not None:
-                for attr, (key, typ) in manifest_attrs_required.items():
-                    setattr(self, attr, typ(info[key]))
-            if manifest_attrs_optionals is not None:
-                for attr, (key, typ) in manifest_attrs_optionals.items():
-                    setattr(self, attr, typ(info.get(key)) if key in info else None)
 
     def __getattr__(self, name: str):
         if self._extract_condition(self, name):
@@ -794,17 +783,13 @@ class ApkmFile(_BaseZipApkFile):
             manifest_json_path='info.json',
             base_apk_path='base.apk',
             icon_path='icon.png',
-            manifest_attrs_always={
-                 'app_name': ('app_name', str),
-                 'apkm_version': ('apkm_version', int)
-            },
-            manifest_attrs_required={
-                 'package_name': ('pname', str),
-                 'version_code': ('versioncode', int),
-                 'min_sdk_version': ('min_api', int),
-            },
-            manifest_attrs_optionals={
-                'version_name': ('release_version', str)
+            manifest_attrs={  # attr: (key, type, required)
+                'app_name': ('app_name', str, True),
+                'apkm_version': ('apkm_version', int, True),
+                'package_name': ('pname', str, True),
+                'version_code': ('versioncode', int, True),
+                'min_sdk_version': ('min_api', int, True),
+                'version_name': ('release_version', str, False),
             },
             extract_condition=lambda _, item: item in (
                 'base', 'splits', 'icon', 'target_sdk_version', 'permissions', 'features', 'libraries', 'labels',
@@ -917,22 +902,18 @@ class XapkFile(_BaseZipApkFile):
             base_apk_path='{package_name}.apk',
             icon_path='icon.png',
             extract_condition=lambda _, item: item in (
-                'base', 'splits', 'icon', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
+                'base', 'splits', 'icon', 'features', 'libraries', 'labels', 'langs', 'supported_screens', 'abis',
                 'launchable_activity', 'densities', 'supports_any_density'
             ),
-            manifest_attrs_always={
-                'app_name': ('name', str),
-                'xapk_version': ('xapk_version', int)
-            },
-            manifest_attrs_required={
-                'package_name': ('package_name', str),
-                'version_code': ('version_code', int),
-                'min_sdk_version': ('min_sdk_version', int),
-            },
-            manifest_attrs_optionals={
-                'version_name': ('version_name', str),
-                'target_sdk_version': ('target_sdk_version', int),
-                'permissions': ('permissions', tuple),
+            manifest_attrs={  # attr: (key, type, required)
+                'app_name': ('name', str, True),
+                'xapk_version': ('xapk_version', int, True),
+                'package_name': ('package_name', str, True),
+                'version_code': ('version_code', int, True),
+                'min_sdk_version': ('min_sdk_version', int, True),
+                'version_name': ('version_name', str, False),
+                'target_sdk_version': ('target_sdk_version', int, False),
+                'permissions': ('permissions', tuple, False),
             },
             extract_path=extract_path,
             aapt_path=aapt_path,
@@ -1044,21 +1025,17 @@ class ApksFile(_BaseZipApkFile):
             'icon_path': 'icon.png',
             'extract_condition': lambda slf, item: (item in (
                 'min_sdk_version', 'target_sdk_version') and slf.meta_version < 2) or item in (
-                'base', 'splits', 'icon', 'features', 'permissions', 'libraries', 'labels', 'langs',
-                'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'
-            ),
-            'manifest_attrs_always': {
-                'package_name': ('package', str),
-                'app_name': ('label', str),
-            },
-            'manifest_attrs_required': {
-                'version_code': ('version_code', int)
-            },
-            'manifest_attrs_optionals': {
-                'version_name': ('version_name', str),
-                'min_sdk_version': ('min_sdk', int),
-                'target_sdk_version': ('target_sdk', int),
-                'meta_version': ('meta_version', int),
+                                                       'base', 'splits', 'icon', 'features', 'permissions', 'libraries', 'labels', 'langs', 'abis',
+                                                       'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'
+                                                   ),
+            'manifest_attrs': {  # attr: (key, type, required)
+                'package_name': ('package', str, True),
+                'app_name': ('label', str, True),
+                'version_code': ('version_code', int, True),
+                'version_name': ('version_name', str, False),
+                'min_sdk_version': ('min_sdk', int, False),
+                'target_sdk_version': ('target_sdk', int, False),
+                'meta_version': ('meta_version', int, False),
             },
         }
         try:
