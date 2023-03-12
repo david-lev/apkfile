@@ -63,7 +63,7 @@ def get_raw_aapt(apk_path: str, aapt_path: Optional[str] = None) -> str:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             check=True).stdout.decode('utf-8')
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(e.stderr.decode('utf-8'))
+        raise RuntimeError(e.stderr.decode('utf-8') or e.stdout.decode('utf-8'))
     except FileNotFoundError as e:
         raise FileNotFoundError('aapt is not installed! see https://github.com/david-lev/apkfile#install-aapt')
 
@@ -100,7 +100,8 @@ def install_apks(
     try:
         adb = adb_path or _get_program_path('adb')
     except FileNotFoundError:
-        raise FileNotFoundError('adb is not installed! see https://developer.android.com/studio/command-line/adb')
+        raise FileNotFoundError('ADB is not installed or not in the PATH! '
+                                'See https://developer.android.com/studio/command-line/adb')
 
     spargs = {'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'check': True}
     if device_id is None:
@@ -176,7 +177,8 @@ def install_apks(
             subprocess.run((*adb_args, 'shell', 'pm', 'install-commit', session_id), **spargs)
 
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Failed to install apk on device {device}: {e.stderr.decode('utf-8')}") from e
+            raise RuntimeError(f"Failed to install apk on device {device}:\n"
+                               f"{e.stdout.decode('utf-8') or e.stderr.decode('utf-8')}") from e
         finally:
             subprocess.run((*adb_args, 'shell', 'rm', '-rf', tmp_path), **spargs)
 
