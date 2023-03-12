@@ -1,3 +1,4 @@
+from __future__ import annotations
 import hashlib
 import json
 import os
@@ -8,7 +9,7 @@ import tempfile
 from datetime import datetime
 from zipfile import ZipFile
 from enum import Enum
-from typing import Optional, Tuple, Union, Iterable, Dict, Any
+from typing import Optional, Tuple, Union, Iterable, Dict, Any, Callable
 
 __all__ = [
     'ApkFile',
@@ -84,7 +85,7 @@ def install_apks(
 
     Args:
         apks: The path to the apk or a list of paths to the apks.
-        check: Check if the app is compatible with the device (abi, minSdkVersion, etc.).
+        check: Check if the app is compatible with the device (``abi``, ``min_sdk_version``, and ``language``).
         upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
         device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
         installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
@@ -97,67 +98,89 @@ def install_apks(
         RuntimeError: If the adb command failed.
     """
     try:
-        adb_path = adb_path or _get_program_path('adb')
+        adb = adb_path or _get_program_path('adb')
     except FileNotFoundError:
         raise FileNotFoundError('adb is not installed! see https://developer.android.com/studio/command-line/adb')
 
     spargs = {'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'check': True}
     if device_id is None:
         devices = tuple(line.split("\t")[0] for line in subprocess.run(
-            [adb_path, 'devices'], **spargs
+            (adb, 'devices'), **spargs
         ).stdout.decode('utf-8').strip().split("\n")[1:] if line.endswith('device'))
     else:
         devices = (device_id,)
 
     for device in devices:
-        cmd_args = (adb_path, '-s', device)
+        adb_args = (adb, '-s', device)
         tmp_path = subprocess.run(
-            [*cmd_args, 'shell', 'mktemp', '-d', '--tmpdir=/data/local/tmp'], **spargs
+            (*adb_args, 'shell', 'mktemp', '-d', '--tmpdir=/data/local/tmp'), **spargs
         ).stdout.decode('utf-8').strip()
 
         if check:
             device_abis = (Abi(abi) for abi in subprocess.run(
-                [*cmd_args, 'shell', 'getprop', 'ro.product.cpu.abilist'], **spargs
+                (*adb_args, 'shell', 'getprop', 'ro.product.cpu.abilist'), **spargs
             ).stdout.decode('utf-8').strip().split(','))
             device_sdk = int(subprocess.run(
-                [*cmd_args, 'shell', 'getprop', 'ro.build.version.sdk'], **spargs
+                (*adb_args, 'shell', 'getprop', 'ro.build.version.sdk'), **spargs
             ).stdout.decode('utf-8').strip())
-            apk_objects = [ApkFile(path=apk, aapt_path=aapt_path) for apk in
-                           ([apks] if isinstance(apks, str) else apks)]
+            device_lang = subprocess.run(
+                (*adb_args, 'shell', 'getprop', 'persist.sys.locale'), **spargs
+            ).stdout.decode('utf-8').strip().split('-')[-1]
+
+            all_apk_objects = tuple(ApkFile(path=apk, aapt_path=aapt_path) for apk in
+                                    ((apks,) if isinstance(apks, str) else apks))
+            langs = tuple(filter(lambda apk: apk.is_split and len(apk.langs) == 1 and
+                                 apk.langs[0] == apk.split_name.split('.')[-1], all_apk_objects))
+            apk_objects = filter(lambda apk: apk not in langs, all_apk_objects)
+
             apks = {}
+            apks_added = 0
             for apk in apk_objects:
                 if (apk.min_sdk_version is None or apk.min_sdk_version <= device_sdk) and \
-                        (not apk.abis or
-                         any(device_abi.is_compatible_with(apk_abi) for apk_abi in apk.abis for device_abi in
-                             device_abis)):
-                    apks[shutil.os.path.abspath(apk.path)] = shutil.os.path.getsize(apk.path)
+                        (not apk.abis or any(device_abi.is_compatible_with(apk_abi) for apk_abi in
+                         apk.abis for device_abi in device_abis)):
+                    apks[os.path.abspath(apk.path)] = os.path.getsize(apk.path)
+                    apks_added += 1
+            if not apks_added:
+                continue  # skip device if no compatible apks found
+
+            added_langs = 0
+            for apk in langs:
+                if apk.langs[0] in ('en', device_lang):
+                    apks[os.path.abspath(apk.path)] = os.path.getsize(apk.path)
+                    added_langs += 1
+            if langs and added_langs == 0:  # add all langs if no compatible langs found
+                for apk in langs:
+                    apks[os.path.abspath(apk.path)] = os.path.getsize(apk.path)
         else:
             apks = {
-                shutil.os.path.abspath(apk): shutil.os.path.getsize(apk)
-                for apk in ([apks] if isinstance(apks, str) else apks)
+                os.path.abspath(apk): os.path.getsize(apk)
+                for apk in ((apks,) if isinstance(apks, str) else apks)
             }
 
+        print(apks)
+
         try:
-            subprocess.run([*cmd_args, 'push', *apks, tmp_path], **spargs)
-            session_id = re.search(r'[0-9]+', subprocess.run(
-                [*cmd_args, 'shell', 'pm', 'install-create',
-                 ('-r' if upgrade else ''), *(['-i', installer] if installer else []),
-                 *(['--originating-uri', originating_uri] if originating_uri else []),
-                 '-S', str(sum(apks.values()))], **spargs
+            subprocess.run((*adb_args, 'push', *apks, tmp_path), **spargs)
+            session_id = re.search(r'\d+', subprocess.run(
+                (*adb_args, 'shell', 'pm', 'install-create',
+                 ('-r' if upgrade else ''), *(('-i', installer) if installer else ()),
+                 *(('--originating-uri', originating_uri) if originating_uri else ()),
+                 '-S', str(sum(apks.values()))), **spargs
             ).stdout.decode('utf-8')).group(0)
 
             for idx, (apk, size) in enumerate(apks.items()):
-                basename = shutil.os.path.basename(apk)
+                basename = os.path.basename(apk)
                 subprocess.run(
-                    [*cmd_args, 'shell', 'pm', 'install-write', '-S',
-                     str(size), session_id, str(idx), f'{tmp_path}/{basename}'], **spargs
+                    (*adb_args, 'shell', 'pm', 'install-write', '-S',
+                     str(size), session_id, str(idx), f'{tmp_path}/{basename}'), **spargs
                 )
-            subprocess.run([*cmd_args, 'shell', 'pm', 'install-commit', session_id], **spargs)
+            subprocess.run((*adb_args, 'shell', 'pm', 'install-commit', session_id), **spargs)
 
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to install apk on device {device}: {e.stderr.decode('utf-8')}") from e
         finally:
-            subprocess.run([*cmd_args, 'shell', 'rm', '-rf', tmp_path], **spargs)
+            subprocess.run((*adb_args, 'shell', 'rm', '-rf', tmp_path), **spargs)
 
 
 class InstallLocation(Enum):
@@ -271,6 +294,29 @@ _extraction_patterns = {
 
 
 class _BaseApkFile:
+    __slots__ = (
+        'path',
+        'package_name',
+        'version_code',
+        'version_name',
+        'min_sdk_version',
+        'target_sdk_version',
+        'install_location',
+        'labels',
+        'permissions',
+        'libraries',
+        'features',
+        'launchable_activity',
+        'supported_screens',
+        'supports_any_density',
+        'langs',
+        'densities',
+        'split_name',
+        'abis',
+        'icons',
+        '_raw',
+        '_aapt_path'
+    )
     package_name: str
     version_code: int
     version_name: Optional[str]
@@ -347,7 +393,7 @@ class _BaseApkFile:
             device_id=device_id,
             installer=installer,
             originating_uri=originating_uri,
-            adb_path=adb_path
+            adb_path=adb_path or self._aapt_path,
         )
 
     def __repr__(self) -> str:
@@ -400,7 +446,6 @@ class ApkFile(_BaseApkFile):
             `↗️ <https://developer.android.com/studio/build/configure-apk-splits.html>`_
 
         is_split: Whether the apk is a split apk.
-        is_universal: Whether the apk is a universal apk (supports all ABIs).
         path: The path to the apk file.
         size: The size of the apk file.
         md5: The MD5 hash of the apk file.
@@ -408,7 +453,6 @@ class ApkFile(_BaseApkFile):
     """
     split_name: Optional[str]
     is_split: bool
-    is_universal: bool
 
     def __init__(
             self,
@@ -434,6 +478,7 @@ class ApkFile(_BaseApkFile):
         if isinstance(path, os.PathLike):
             path = os.fspath(path)
         self.path = path
+        self._aapt_path = aapt_path
         try:
             raw = get_raw_aapt(apk_path=self.path, aapt_path=aapt_path)
         except RuntimeError as e:
@@ -470,7 +515,7 @@ class ApkFile(_BaseApkFile):
     @property
     def is_split(self) -> bool:
         """Check if the apk is a split apk."""
-        return self.split_name is not None if hasattr(self, 'split_name') else False
+        return self.split_name is not None
 
     def extract(self, path: str, members: Optional[Iterable[str]] = None) -> None:
         """
@@ -485,10 +530,8 @@ class ApkFile(_BaseApkFile):
         self.as_zip_file().extractall(path=path, members=members)
 
     def as_dict(self) -> Dict[str, Any]:
-        return {
-            k: v.as_dict() if hasattr(v, 'as_dict') else v
-            for k, v in self.__dict__.items() if not k.startswith('_')
-        }
+        """Return a dict representation of the apk file."""
+        return {k: getattr(self, k) for k in self.__slots__ if not k.startswith('_')}
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(pkg={self.package_name!r}, version={self.version_code!r}" \
@@ -496,6 +539,19 @@ class ApkFile(_BaseApkFile):
 
 
 class _BaseZipApkFile(_BaseApkFile):
+    __slots__ = (
+        'base',
+        'splits',
+        'icon',
+        'app_name',
+        '_zipfile',
+        '_base_path',
+        '_icon_path',
+        '_extract_path',
+        '_extracted',
+        '_skip_broken_splits',
+        '_extract_condition'
+    )
     base: ApkFile
     splits: Tuple[ApkFile]
     icon: str
@@ -506,29 +562,66 @@ class _BaseZipApkFile(_BaseApkFile):
             path: Union[str, os.PathLike[str]],
             manifest_json_path: str,
             base_apk_path: str,
+            icon_path: str,
+            extract_condition: Callable[[Any, str], bool],
+            manifest_attrs_always: Dict[str, (str, type)],
+            manifest_attrs_required: Optional[Dict[str, (str, type)]] = None,
+            manifest_attrs_optionals: Optional[Dict[str, (str, type)]] = None,
             extract_path: Optional[Union[str, os.PathLike[str]]] = None,
             aapt_path: Optional[Union[str, os.PathLike[str]]] = None,
             skip_broken_splits: bool = False
     ):
+        """
+        Base init for zip based apk files like ``apkm``, ``xapk`` and ``apks``.
+
+        Args:
+            path: Path to the apk file.
+            manifest_json_path: Path to the json file containing the apk info.
+            base_apk_path: Relative path to the base apk file in the archive. (Can contain format strings)
+            icon_path: Relative path to the icon file in the archive. (Can contain format strings)
+            manifest_attrs_always: A dict of attributes to always extract from the manifest. The key is the attribute name and the value is the key in the manifest.
+            manifest_attrs_required: A dict of required attributes to extract from the manifest if ``extract_path`` not provided. The key is the attribute name and the value is the key in the manifest.
+            manifest_attrs_optionals: A dict of optional attributes to extract from the manifest if ``extract_path`` not provided. The key is the attribute name and the value is the key in the manifest.
+            extract_path: Path to extract the apk to. If not provided, a temporary directory will be created. (Can contain format strings)
+            extract_condition: A callable that takes the instance and the item name and returns a boolean if the files should be extracted.  The callable signature: ``(self, item_name) -> bool``
+            aapt_path: Path to the aapt binary.
+            skip_broken_splits: If True, broken splits will be skipped.
+        """
         if isinstance(path, os.PathLike):
             path = os.fspath(path)
         self.path = path
-        self.abis = tuple()  # every split has its own abi
         self._zipfile = ZipFile(self.path)
         try:
             with self._zipfile.open(manifest_json_path) as f:
-                self._info = json.load(f)
-                self._base_path = base_apk_path.format(**self._info)
+                info = json.load(f)
+                self._base_path = base_apk_path.format(**info)
+                for attr, (key, typ) in manifest_attrs_always.items():
+                    setattr(self, attr, typ(info[key]))
         except (KeyError, json.JSONDecodeError) as e:
             raise FileExistsError(f'Invalid file: {self.path}') from e
 
-        self._extract_path = extract_path or tempfile.mkdtemp()
+        self._extract_path = (extract_path or tempfile.mkdtemp()).format(**info)
+        self._icon_path = icon_path.format(**info)
         self._extracted = False
-        self._splits_paths = list(
-            filter(lambda x: x.endswith('.apk') and x != self._base_path, self._zipfile.namelist()))
-        self._icon_path = 'icon.png'
         self._aapt_path = aapt_path
         self._skip_broken_splits = skip_broken_splits
+        self._extract_condition = extract_condition
+
+        if extract_path:
+            self._extract()
+        else:
+            if manifest_attrs_required is not None:
+                for attr, (key, typ) in manifest_attrs_required.items():
+                    setattr(self, attr, typ(info[key]))
+            if manifest_attrs_optionals is not None:
+                for attr, (key, typ) in manifest_attrs_optionals.items():
+                    setattr(self, attr, typ(info.get(key)) if key in info else None)
+
+    def __getattr__(self, name: str):
+        if self._extract_condition(self, name):
+            self._extract()
+            return object.__getattribute__(self, name)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     def __enter__(self):
         """Extract the apkm file to a directory."""
@@ -543,14 +636,14 @@ class _BaseZipApkFile(_BaseApkFile):
         """Extract the files"""
         if self._extracted:
             return
-        self._zipfile.extractall(path=self._extract_path,
-                                 members=(self._base_path, *self._splits_paths, self._icon_path))
+        splits_paths = list(filter(lambda x: x.endswith('.apk') and x != self._base_path, self._zipfile.namelist()))
+        self._zipfile.extractall(path=self._extract_path, members=(self._base_path, self._icon_path, *splits_paths))
         self._extracted = True
         self.base = ApkFile(path=os.path.join(self._extract_path, self._base_path), aapt_path=self._aapt_path)
         self.icon = os.path.join(self._extract_path, self._icon_path)
 
         splits = []
-        for split in self._splits_paths:
+        for split in splits_paths:
             try:
                 splits.append(ApkFile(path=os.path.join(self._extract_path, split), aapt_path=self._aapt_path))
             except FileExistsError:
@@ -563,21 +656,12 @@ class _BaseZipApkFile(_BaseApkFile):
                      'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'):
             setattr(self, attr, getattr(self.base, attr))
 
-        self.permissions = tuple(
-            set(p for split in self.splits for p in split.permissions) | set(self.base.permissions))
-        self.features = tuple(set(f for split in self.splits for f in split.features) | set(self.base.features))
-        self.libraries = tuple(set(x for split in self.splits for x in split.libraries) | set(self.base.libraries))
+        for attr in ('permissions', 'features', 'libraries', 'langs', 'abis'):
+            setattr(self, attr, tuple(set(x for split in self.splits for x in
+                                          getattr(split, attr)) | set(getattr(self.base, attr))))
+
         self.labels = {k: v for labels in [split.labels for split in self.splits]
                        + [self.base.labels] for k, v in labels.items()}
-        self.langs = tuple(set(lang for split in self.splits for lang in split.langs) | set(self.base.langs))
-
-    def __getattribute__(self, item):
-        """
-        Override the attribute getter to extract the files if needed
-
-        >>> if item in ('base', 'splits', 'icon', 'app_name'): self._extract()
-        """
-        return super().__getattribute__(item)
 
     def delete_extracted_files(self) -> None:
         """
@@ -608,7 +692,7 @@ class _BaseZipApkFile(_BaseApkFile):
             installer=installer,
             originating_uri=originating_uri,
             adb_path=adb_path,
-            aapt_path=aapt_path
+            aapt_path=aapt_path or self._aapt_path
         )
         if delete_after_install:
             self.delete_extracted_files()
@@ -668,6 +752,7 @@ class ApkmFile(_BaseZipApkFile):
         md5: The MD5 hash of the apk file.
         sha256: The SHA256 hash of the apk file.
     """
+    __slots__ = ('apkm_version',)
     apkm_version: int
 
     def __init__(
@@ -708,27 +793,27 @@ class ApkmFile(_BaseZipApkFile):
             path=path,
             manifest_json_path='info.json',
             base_apk_path='base.apk',
+            icon_path='icon.png',
+            manifest_attrs_always={
+                 'app_name': ('app_name', str),
+                 'apkm_version': ('apkm_version', int)
+            },
+            manifest_attrs_required={
+                 'package_name': ('pname', str),
+                 'version_code': ('versioncode', int),
+                 'min_sdk_version': ('min_api', int),
+            },
+            manifest_attrs_optionals={
+                'version_name': ('release_version', str)
+            },
+            extract_condition=lambda _, item: item in (
+                'base', 'splits', 'icon', 'target_sdk_version', 'permissions', 'features', 'libraries', 'labels',
+                'langs', 'abis', 'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'
+            ),
             extract_path=extract_path,
             aapt_path=aapt_path,
             skip_broken_splits=skip_broken_splits
         )
-
-        self.app_name = self._info['app_name']
-        self.apkm_version = self._info['apkm_version']
-        if not extract_path:
-            self.package_name = self._info['pname']
-            self.version_code = self._info['versioncode']
-            self.version_name = self._info['release_version']
-            self.min_sdk_version = self._info['min_api']
-        else:
-            self._extract()
-
-    def __getattribute__(self, item):
-        if item in ('base', 'splits', 'icon', 'target_sdk_version',
-                    'permissions', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
-                    'launchable_activity', 'densities', 'supports_any_density'):
-            self._extract()
-        return super().__getattribute__(item)
 
 
 class XapkFile(_BaseZipApkFile):
@@ -775,6 +860,8 @@ class XapkFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/guide/topics/resources/localization>`_
         densities: Supported pixel densities.
             `↗️ <https://developer.android.com/guide/topics/large-screens/support-different-screen-sizes>`_
+        abis: Android supported ABIs.
+            `↗️ <https://developer.android.com/ndk/guides/abis>`_
         icons: Path's to the app icons.
             `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
 
@@ -785,6 +872,7 @@ class XapkFile(_BaseZipApkFile):
         md5: The MD5 hash of the apk file.
         sha256: The SHA256 hash of the apk file.
     """
+    __slots__ = ('xapk_version',)
     xapk_version: int
 
     def __init__(
@@ -827,29 +915,29 @@ class XapkFile(_BaseZipApkFile):
             path=path,
             manifest_json_path='manifest.json',
             base_apk_path='{package_name}.apk',
+            icon_path='icon.png',
+            extract_condition=lambda _, item: item in (
+                'base', 'splits', 'icon', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
+                'launchable_activity', 'densities', 'supports_any_density'
+            ),
+            manifest_attrs_always={
+                'app_name': ('name', str),
+                'xapk_version': ('xapk_version', int)
+            },
+            manifest_attrs_required={
+                'package_name': ('package_name', str),
+                'version_code': ('version_code', int),
+                'min_sdk_version': ('min_sdk_version', int),
+            },
+            manifest_attrs_optionals={
+                'version_name': ('version_name', str),
+                'target_sdk_version': ('target_sdk_version', int),
+                'permissions': ('permissions', tuple),
+            },
             extract_path=extract_path,
             aapt_path=aapt_path,
             skip_broken_splits=skip_broken_splits
         )
-
-        self.app_name = self._info['name']
-        self.xapk_version = self._info['xapk_version']
-        if not extract_path:
-            self.package_name = self._info['package_name']
-            self.version_code = int(self._info['version_code'])
-            self.version_name = self._info.get('version_name')
-            self.min_sdk_version = int(self._info['min_sdk_version'])
-            self.target_sdk_version = int(
-                self._info['target_sdk_version']) if 'target_sdk_version' in self._info else None
-            self.permissions = self._info.get('permissions', ())
-        else:
-            self._extract()
-
-    def __getattribute__(self, item):
-        if item in ('base', 'splits', 'icon', 'features', 'libraries', 'labels', 'langs', 'supported_screens',
-                    'launchable_activity', 'densities', 'supports_any_density'):
-            self._extract()
-        return super().__getattribute__(item)
 
 
 class ApksFile(_BaseZipApkFile):
@@ -897,6 +985,8 @@ class ApksFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/guide/topics/resources/localization>`_
         densities: Supported pixel densities.
             `↗️ <https://developer.android.com/guide/topics/large-screens/support-different-screen-sizes>`_
+        abis: Android supported ABIs.
+            `↗️ <https://developer.android.com/ndk/guides/abis>`_
         icons: Path's to the app icons.
             `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
 
@@ -907,6 +997,7 @@ class ApksFile(_BaseZipApkFile):
         md5: The MD5 hash of the apk file.
         sha256: The SHA256 hash of the apk file.
     """
+    __slots__ = ('meta_version',)
     meta_version: int
 
     def __init__(
@@ -949,29 +1040,29 @@ class ApksFile(_BaseZipApkFile):
             'extract_path': extract_path,
             'skip_broken_splits': skip_broken_splits,
             'aapt_path': aapt_path,
-            'base_apk_path': 'base.apk'
+            'base_apk_path': 'base.apk',
+            'icon_path': 'icon.png',
+            'extract_condition': lambda slf, item: (item in (
+                'min_sdk_version', 'target_sdk_version') and slf.meta_version < 2) or item in (
+                'base', 'splits', 'icon', 'features', 'permissions', 'libraries', 'labels', 'langs',
+                'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'
+            ),
+            'manifest_attrs_always': {
+                'package_name': ('package', str),
+                'app_name': ('label', str),
+            },
+            'manifest_attrs_required': {
+                'version_code': ('version_code', int)
+            },
+            'manifest_attrs_optionals': {
+                'version_name': ('version_name', str),
+                'min_sdk_version': ('min_sdk', int),
+                'target_sdk_version': ('target_sdk', int),
+                'meta_version': ('meta_version', int),
+            },
         }
         try:
             super().__init__(manifest_json_path='meta.sai_v2.json', **kwargs)
-            self.meta_version = self._info['meta_version']
-            if not extract_path:
-                self.min_sdk_version = self._info['min_sdk']
-                self.target_sdk_version = self._info['target_sdk']
         except FileExistsError:
             super().__init__(manifest_json_path='meta.sai_v1.json', **kwargs)
             self.meta_version = 1
-
-        self.app_name = self._info['label']
-        if not extract_path:
-            self.package_name = self._info['package']
-            self.version_code = int(self._info['version_code'])
-            self.version_name = self._info.get('version_name')
-        else:
-            self._extract()
-
-    def __getattribute__(self, item):
-        if (item in ('min_sdk_version', 'target_sdk_version') and super().__getattribute__('meta_version') < 2) \
-                or item in ('base', 'splits', 'icon', 'features', 'permissions', 'libraries', 'labels', 'langs',
-                            'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'):
-            self._extract()
-        return super().__getattribute__(item)

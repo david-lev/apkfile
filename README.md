@@ -1,11 +1,14 @@
-# ⛏️ [apkfile](https://github.com/david-lev/apkfile) • Python wrapper for aapt
+## ⛏️ [apkfile](https://github.com/david-lev/apkfile) • Python library for handling APK, APKM, XAPK, and APKS files
 [![CodeFactor](https://www.codefactor.io/repository/github/david-lev/apkfile/badge)](https://www.codefactor.io/repository/github/david-lev/apkfile)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/apkfile?style=flat-square)](https://badge.fury.io/py/apkfile)
 [![PyPI Version](https://badge.fury.io/py/apkfile.svg)](https://pypi.org/project/apkfile/)
 
-**apkfile** is a Python library that extracts information from ``.APK``, ``.APKM``, ``.XAPK``, and ``.APKS`` files using [``aapt``](https://elinux.org/Android_aapt). It provides additional metadata beyond what's available in the ``AndroidManifest.xml`` file, such as the abis, minSdkVersion, targetSdkVersion, and more.
+### How this library works?
+This library uses [``aapt``](https://elinux.org/Android_aapt) to extract information from the `.APK` file, and then parses the output to get the information.
+- For `.APKM`, `.XAPK`, and `.APKS` files, the basic information (`package_name`, `version_name`, `version_code`, etc.) is derived the manifest file, and the rest of the information is extracted when it requested (lazy evaluation).
+- The library also provide ways to install the files (and check compatibility; `min_sdk_version` and `abis`) using [``adb``](https://developer.android.com/studio/command-line/adb).
 
-## Installation
+
 ### Install with pip
 ```bash
 pip3 install -U apkfile
@@ -19,7 +22,7 @@ python3 setup.py install
 
 You also need to install ``aapt`` (see [Install aapt](#install-aapt) below).
 
-## Usage
+### Usage
 
 ```python
 from apkfile import ApkFile, XapkFile, ApkmFile, ApksFile
