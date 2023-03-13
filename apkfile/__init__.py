@@ -24,7 +24,7 @@ __all__ = [
 __copyright__ = f'Copyright {datetime.now().year} david-lev'
 __license__ = 'MIT'
 __title__ = 'apkfile'
-__version__ = '0.1.4'
+__version__ = '0.1.5'
 
 
 def _get_program_path(program: str) -> str:
@@ -126,7 +126,7 @@ def install_apks(
             ).stdout.decode('utf-8').strip())
             device_lang = subprocess.run(
                 (*adb_args, 'shell', 'getprop', 'persist.sys.locale'), **spargs
-            ).stdout.decode('utf-8').strip().split('-')[-1]
+            ).stdout.decode('utf-8').strip().split('-')[0]
 
             all_apk_objects = tuple(ApkFile(path=apk, aapt_path=aapt_path) for apk in
                                     ((apks,) if isinstance(apks, str) else apks))
@@ -373,7 +373,7 @@ class _BaseApkFile:
         This function will take some time to run, depending on the size of the apk(s) and the speed of the device.
 
         Args:
-            check: Check if the app is compatible with the device (abi, minSdkVersion, etc.).
+            check: Check if the app is compatible with the device (``abi``, ``min_sdk_version``, and ``language``).
             upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
             device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
             installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
@@ -393,7 +393,28 @@ class _BaseApkFile:
             installer=installer,
             originating_uri=originating_uri,
             adb_path=adb_path or self._aapt_path,
+            aapt_path=aapt_path or self._aapt_path
         )
+
+    def rename(self, name: str):
+        """
+        Rename the file.
+
+        >>> apk_file.rename('{package_name}-{version_code}.apk')
+        >>> apkmfile.splits[0].rename('{split_name}-{version_code}.apk')
+
+        Args:
+            name: The new name of the file. Can contain format strings for the apk attributes.
+
+        Raises:
+            AttributeError: If one of the format strings not in the file attrs, or the value is not a string or an int.
+        """
+        format_strings = re.findall(r'{([a-zA-Z_\d]+)}', name)
+        attrs = {k: getattr(self, k) for k in format_strings if isinstance(getattr(self, k), (str, int))}
+        format_name = name.format(**attrs)
+        new_path = os.path.join(os.path.dirname(self.path), format_name)
+        os.rename(self.path, new_path)
+        self.path = new_path
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(pkg='{self.package_name}', version={self.version_code})"
