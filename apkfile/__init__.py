@@ -19,12 +19,13 @@ __all__ = [
     'install_apks',
     'get_raw_aapt',
     'Abi',
-    'InstallLocation'
+    'InstallLocation',
+    'SplitType'
 ]
 __copyright__ = f'Copyright {datetime.now().year} david-lev'
 __license__ = 'MIT'
 __title__ = 'apkfile'
-__version__ = '0.1.5'
+__version__ = '0.1.6'
 
 
 def _get_program_path(program: str) -> str:
@@ -68,26 +69,44 @@ def get_raw_aapt(apk_path: str, aapt_path: Optional[str] = None) -> str:
         raise FileNotFoundError('aapt is not installed! see https://github.com/david-lev/apkfile#install-aapt')
 
 
+_dpis = {
+    'ldpi': 120,
+    'mdpi': 160,
+    'hdpi': 240,
+    'xhdpi': 320,
+    'xxhdpi': 480,
+    'xxxhdpi': 640
+}
+
+
 def install_apks(
         apks: Union[str, Iterable[str]],
         check: bool = True,
         upgrade: bool = False,
         device_id: Optional[str] = None,
+        skip_broken: bool = False,
         installer: Optional[str] = None,
         originating_uri: Optional[str] = None,
         adb_path: Optional[str] = None,
         aapt_path: Optional[str] = None
 ):
     """
-    Install apk(s) on a device using `adb <https://developer.android.com/studio/command-line/adb>`_.
+    Install apk(s) on android device(s) using `adb <https://developer.android.com/studio/command-line/adb>`_.
 
-    This function will take some time to run, depending on the size of the apk(s) and the speed of the device.
+    The ``check`` argument is True by default, which means that the app(s) will be checked if they are compatible with the device(s) before installing them.
+    The check is done by comparing ``min_sdk_version``, ``abis``, ``screen_densities`` and ``locales`` with the device(s) capabilities.
+
+    >>> install_apks('path/to/apk.apk')
+    >>> install_apks(['path/to/base.apk', 'path/to/split.apk'], device_id='emulator-5554', skip_broken=True)
+    >>> install_apks('path/to/apk.apk', check=False, installer='com.android.vending', upgrade=True)
+    >>> install_apks('path/to/apk.apk', adb_path='/path/to/adb', aapt_path='/path/to/aapt')
 
     Args:
         apks: The path to the apk or a list of paths to the apks.
-        check: Check if the app is compatible with the device (``abi``, ``min_sdk_version``, and ``language``).
+        check: Check if the app is compatible with the device.
         upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
         device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
+        skip_broken: Skip broken apks.
         installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
         originating_uri: The URI of the app that is performing the installation.
         adb_path: The path to the adb executable (If not specified, adb will be searched in the ``PATH``).
@@ -118,56 +137,87 @@ def install_apks(
         ).stdout.decode('utf-8').strip()
 
         if check:
+            all_apks = []
+            for apk in ((apks,) if isinstance(apks, str) else apks):
+                try:
+                    all_apks.append(ApkFile(path=apk, aapt_path=aapt_path))
+                except FileExistsError:
+                    if not skip_broken:
+                        raise
+            if not all_apks:  # all apks are broken
+                return
+            lang_splits = tuple(apk for apk in all_apks if apk.split_type == SplitType.LANGUAGE)
+            dpi_splits = tuple(apk for apk in all_apks if apk.split_type == SplitType.DPI)
+            abi_splits = tuple(apk for apk in all_apks if apk.split_type == SplitType.ABI)
+            others = filter(lambda a: a not in (*lang_splits, *dpi_splits, *abi_splits), all_apks)
+
+            apks_to_install: Dict[str, int] = {}
+
             device_abis = (Abi(abi) for abi in subprocess.run(
                 (*adb_args, 'shell', 'getprop', 'ro.product.cpu.abilist'), **spargs
             ).stdout.decode('utf-8').strip().split(','))
             device_sdk = int(subprocess.run(
                 (*adb_args, 'shell', 'getprop', 'ro.build.version.sdk'), **spargs
             ).stdout.decode('utf-8').strip())
-            device_lang = subprocess.run(
-                (*adb_args, 'shell', 'getprop', 'persist.sys.locale'), **spargs
-            ).stdout.decode('utf-8').strip().split('-')[0]
 
-            all_apk_objects = tuple(ApkFile(path=apk, aapt_path=aapt_path) for apk in
-                                    ((apks,) if isinstance(apks, str) else apks))
-            langs = tuple(filter(lambda apk: apk.is_language_split, all_apk_objects))
-            apk_objects = filter(lambda apk: apk not in langs, all_apk_objects)
-
-            apks = {}
-            apks_added = 0
-            for apk in apk_objects:
+            for apk in others:  # contains the base apk and any other apks that are not abis, langs, or dpis
                 if (apk.min_sdk_version is None or apk.min_sdk_version <= device_sdk) and \
                         (not apk.abis or any(device_abi.is_compatible_with(apk_abi) for apk_abi in
                                              apk.abis for device_abi in device_abis)):
-                    apks[os.path.abspath(apk.path)] = os.path.getsize(apk.path)
-                    apks_added += 1
-            if not apks_added:
+                    apks_to_install[apk.path] = apk.size
+            if not apks_to_install:
                 continue  # skip device if no compatible apks found
 
-            added_langs = 0
-            for apk in langs:
-                if apk.langs[0] in ('en', device_lang):
-                    apks[os.path.abspath(apk.path)] = os.path.getsize(apk.path)
-                    added_langs += 1
-            if langs and added_langs == 0:  # add all langs if no compatible langs found
-                for apk in langs:
-                    apks[os.path.abspath(apk.path)] = os.path.getsize(apk.path)
-        else:
-            apks = {
-                os.path.abspath(apk): os.path.getsize(apk)
-                for apk in ((apks,) if isinstance(apks, str) else apks)
-            }
+            if abi_splits:
+                device_main_abi = Abi(subprocess.run(
+                    (*adb_args, 'shell', 'getprop', 'ro.product.cpu.abi'), **spargs
+                ).stdout.decode('utf-8').strip())
+                abi = next((abi_split for abi_split in abi_splits if device_main_abi == abi_split.abis[0]), None)
+                if abi is None:
+                    continue
+                apks_to_install[abi.path] = abi.size
 
+            if lang_splits:
+                device_lang = subprocess.run(
+                    (*adb_args, 'shell', 'getprop', 'persist.sys.locale'), **spargs
+                ).stdout.decode('utf-8').strip().split('-')[0]
+                added_lang = False
+                for lang_split in lang_splits:
+                    if any(device_lang in lang for lang in lang_split.langs):
+                        apks_to_install[lang_split.path] = lang_split.size
+                        added_lang = True
+                if not added_lang:  # add all langs if no compatible langs found
+                    for lang_split in lang_splits:
+                        apks_to_install[lang_split.path] = lang_split.size
+
+            if dpi_splits:  # add compatible dpi split
+                device_dpi = int(subprocess.run(
+                    (*adb_args, 'shell', 'getprop', 'ro.sf.lcd_density'), **spargs
+                ).stdout.decode('utf-8').strip())
+                closest_dpi = None
+                for dpi_split in dpi_splits:
+                    dpi = _dpis.get(dpi_split.split_name.split('.')[-1])
+                    if dpi is not None and (closest_dpi is None or abs(dpi - device_dpi) <
+                                            abs(closest_dpi - device_dpi)):
+                        closest_dpi = dpi
+                        split = dpi_split
+                if closest_dpi is not None:
+                    apks_to_install[split.path] = split.size
+        else:
+            apks_to_install = {
+                apk_path: os.path.getsize(apk_path)
+                for apk_path in ((apks,) if isinstance(apks, str) else apks)
+            }
         try:
-            subprocess.run((*adb_args, 'push', *apks, tmp_path), **spargs)
+            subprocess.run((*adb_args, 'push', *apks_to_install, tmp_path), **spargs)
             session_id = re.search(r'\d+', subprocess.run(
                 (*adb_args, 'shell', 'pm', 'install-create',
                  ('-r' if upgrade else ''), *(('-i', installer) if installer else ()),
                  *(('--originating-uri', originating_uri) if originating_uri else ()),
-                 '-S', str(sum(apks.values()))), **spargs
+                 '-S', str(sum(apks_to_install.values()))), **spargs
             ).stdout.decode('utf-8')).group(0)
 
-            for idx, (apk, size) in enumerate(apks.items()):
+            for idx, (apk, size) in enumerate(apks_to_install.items()):
                 basename = os.path.basename(apk)
                 subprocess.run(
                     (*adb_args, 'shell', 'pm', 'install-write', '-S',
@@ -270,6 +320,23 @@ _compatibility_map = {
     Abi.UNKNOWN: frozenset(),
 }
 
+
+class SplitType(Enum):
+    """
+    Split types.
+
+    Attributes:
+        LANGUAGE: Language split.
+        DPI: DPI split.
+        ABI: ABI split.
+        OTHER: Other split.
+    """
+    LANGUAGE = 'language'
+    DPI = 'dpi'
+    ABI = 'abi'
+    OTHER = 'other'
+
+
 _extraction_patterns = {
     'package_name': r'package: name=\'([^\']+)\'',
     'version_code': r'versionCode=\'([^\']+)\'',
@@ -284,7 +351,7 @@ _extraction_patterns = {
     'launchable_activity': r'launchable-activity: name=\'([^\']+)\'',
     'supported_screens': r'supports-screens: \'([a-z\'\s]+)\'',
     'supports_any_density': r'supports-any-density: \'([^\']+)\'',
-    'langs': r'locales: \'([a-zA-Z\'\s\-\_]+)\'',
+    'langs': r'locales: \'([a-zA-Z0-9\'\s\-\_]+)\'',
     'densities': r'densities: \'([0-9\'\s]+)\'',
     'abis': r'native-code: \'([^\']+)\'',
     'icons': r'application-icon-([0-9]+):\'' + r'([^\']+)\'',
@@ -362,6 +429,7 @@ class _BaseApkFile:
             check: bool = True,
             upgrade: bool = False,
             device_id: Optional[str] = None,
+            skip_broken: bool = False,
             installer: Optional[str] = None,
             originating_uri: Optional[str] = None,
             adb_path: Optional[str] = None,
@@ -370,12 +438,14 @@ class _BaseApkFile:
         """
         Install apk(s) on a device using `adb <https://developer.android.com/studio/command-line/adb>`_.
 
-        This function will take some time to run, depending on the size of the apk(s) and the speed of the device.
+        The ``check`` argument is True by default, which means that the app(s) will be checked if they are compatible with the device(s) before installing them.
+        The check is done by comparing ``min_sdk_version``, ``abis``, ``screen_densities`` and ``locales`` with the device(s) capabilities.
 
         Args:
-            check: Check if the app is compatible with the device (``abi``, ``min_sdk_version``, and ``language``).
+            check: Check if the app is compatible with the device.
             upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
             device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
+            skip_broken: Skip broken apks.
             installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
             originating_uri: The URI of the app that is performing the installation.
             adb_path: The path to the adb executable (If not specified, adb will be searched in the ``PATH``).
@@ -390,9 +460,10 @@ class _BaseApkFile:
             check=check,
             upgrade=upgrade,
             device_id=device_id,
+            skip_broken=skip_broken,
             installer=installer,
             originating_uri=originating_uri,
-            adb_path=adb_path or self._aapt_path,
+            adb_path=adb_path,
             aapt_path=aapt_path or self._aapt_path
         )
 
@@ -466,15 +537,13 @@ class ApkFile(_BaseApkFile):
             `↗️ <https://developer.android.com/studio/build/configure-apk-splits.html>`_
 
         is_split: Whether the apk is a split apk.
-        is_language_split: Whether the apk is a language split apk.
+        split_type: The type of the split apk. e.g. ABI, LANGUAGE, DPI.
         path: The path to the apk file.
         size: The size of the apk file.
         md5: The MD5 hash of the apk file.
         sha256: The SHA256 hash of the apk file.
     """
     split_name: Optional[str]
-    is_split: bool
-    is_language_split: bool
 
     def __init__(
             self,
@@ -528,7 +597,7 @@ class ApkFile(_BaseApkFile):
             data.get('supports_screens') else ()
         self.supports_any_density = (data.get('supports_any_density') or (None,))[0] == 'true'
         self.langs = tuple(lang.strip() for lang in re.split(r"'\s'", data['langs'][0]) if
-                           re.match(r'^[A-Za-z\-]+$', lang)) if data.get('langs') else ()
+                           re.match(r'^[\dA-Za-z\-]+$', lang)) if data.get('langs') else ()
         self.densities = tuple(str(d) for d in re.split(r"'\s'", data['densities'][0])) if data.get('densities') else ()
         self.split_name = data.get('split_name')[0] if data.get('split_name') else None
         self.abis = tuple(Abi(abi) for abi in re.split(r"'\s'", data['abis'][0])) if data.get('abis') else ()
@@ -540,9 +609,18 @@ class ApkFile(_BaseApkFile):
         return self.split_name is not None
 
     @property
-    def is_language_split(self) -> bool:
-        """Check if the apk is a language split apk."""
-        return self.is_split and len(self.langs) == 1 and self.langs[0] == self.split_name.split('.')[-1]
+    def split_type(self) -> Optional[SplitType]:
+        """Check if the apk is a split apk."""
+        if not self.is_split:
+            return None
+        split_name = self.split_name.split('.')[-1]
+        if split_name.endswith('dpi'):
+            return SplitType.DPI
+        elif any(split_name in lang for lang in self.langs):
+            return SplitType.LANGUAGE
+        elif len(self.abis) == 1:
+            return SplitType.ABI
+        return SplitType.OTHER
 
     def extract(self, path: str, members: Optional[Iterable[str]] = None) -> None:
         """
@@ -1054,8 +1132,9 @@ class ApksFile(_BaseZipApkFile):
             'icon_path': 'icon.png',
             'extract_condition': lambda slf, item: (item in (
                 'min_sdk_version', 'target_sdk_version') and slf.meta_version < 2) or item in (
-                                                       'base', 'splits', 'icon', 'features', 'permissions', 'libraries', 'labels', 'langs', 'abis',
-                                                       'supported_screens', 'launchable_activity', 'densities', 'supports_any_density'
+                                                       'base', 'splits', 'icon', 'features', 'permissions', 'libraries',
+                                                       'labels', 'langs', 'abis', 'supported_screens',
+                                                       'launchable_activity', 'densities', 'supports_any_density'
                                                    ),
             'manifest_attrs': {  # attr: (key, type, required)
                 'package_name': ('package', str, True),
