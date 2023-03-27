@@ -33,7 +33,7 @@ def main():
     subparsers = parser.add_subparsers(dest='action', help='Action to perform', required=False)
     info_parser = subparsers.add_parser('info', help='Print info')
     info_parser.add_argument('-j', '--json', help='Print info in json format', action='store_true')
-    info_parser.add_argument('--no-recursion', help='Do not print info for split apks', action='store_true')
+    info_parser.add_argument('--recursive', help='Print info recursively', action='store_false')
     info_parser.add_argument('--only', help='Only print the specified fields', nargs='+')
 
     rename_parser = subparsers.add_parser(
@@ -90,33 +90,11 @@ def main():
         if args.action in ('info', None):
             import json
             data = apk.as_dict(
-                only=args.only, **({'recursive': not args.no_recursion} if isinstance(apk, _BaseZipApkFile) else {}))
+                only=args.only, **({'recursive': args.recursive} if isinstance(apk, _BaseZipApkFile) else {}))
             if args.json:
                 print(json.dumps(data, indent=4))
             else:
-                msg = """
-                Package name: {package_name}
-                Version code: {version_code}
-                Version name: {version_name}
-                Min SDK: {min_sdk}
-                Target SDK: {target_sdk}
-                Permissions:
-                {permissions}
-                Features:
-                {features}
-                """
-                print(msg.format(
-                    package_name=apk.package_name,
-                    version_code=apk.version_code,
-                    version_name=apk.version_name,
-                    min_sdk=apk.min_sdk,
-                    target_sdk=apk.target_sdk,
-                    permissions='\n'.join(f'  {p}' for p in apk.permissions),
-                    features='\n'.join(f'  {f}' for f in apk.features)
-                ))
-                if isinstance(apk, _BaseZipApkFile):
-                    print(f'Apks:\n{str(apk)}')
-
+                print(_convert_dict_to_string(data))
         elif args.action == 'rename':
             apk.rename(args.new_name)
             print(f"File renamed to '{apk.path}'")
@@ -133,11 +111,38 @@ def main():
         elif args.action == 'extract':
             apk.extract(args.output)
     except Exception as e:
-        raise
         print(f'Error: {e}')
         sys.exit(1)
     finally:
         shutil.rmtree(tmp_dir)
+
+
+def _convert_dict_to_string(d, indent=0):
+    output = StringIO()
+    for key, value in d.items():
+        camel_key = str(key).replace('_', ' ').title()
+        output.write('  ' * indent + camel_key + ': ')
+        if isinstance(value, str) or isinstance(value, int):
+            output.write(str(value))
+        elif isinstance(value, bool):
+            output.write('yes' if value else 'no')
+        elif isinstance(value, list) or isinstance(value, tuple):
+            if len(value) == 0:
+                output.write('\n')
+            else:
+                output.write('\n')
+                for elem in value:
+                    if isinstance(elem, (dict, list, tuple)):
+                        output.write('  ' * (indent+1))
+                        output.write(_convert_dict_to_string(elem, indent+1))
+                    else:
+                        output.write('  ' * (indent+1))
+                        output.write(str(elem) + '\n')
+        elif isinstance(value, dict):
+            output.write('\n')
+            output.write(_convert_dict_to_string(value, indent+1))
+        output.write('\n')
+    return output.getvalue()
 
 
 if __name__ == '__main__':

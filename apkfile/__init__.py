@@ -106,6 +106,7 @@ def install_apks(
     >>> install_apks(['path/to/base.apk', 'path/to/split.apk'], devices='emulator-5554', skip_broken=True)
     >>> install_apks('path/to/apk.apk', check=False, installer='com.android.vending', upgrade=True)
     >>> install_apks('path/to/apk.apk', adb_path='/path/to/adb', aapt_path='/path/to/aapt')
+    >>> {'emulator-5554': {'path/to/apk.apk': 123456}, 'emulator-5556': {'path/to/apk.apk': 123456}}
 
     Args:
         apks: The path(s) to the apk(s) or an ``ApkFile`` object(s).
