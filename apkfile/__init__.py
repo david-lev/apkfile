@@ -1,3 +1,9 @@
+"""
+- A Python library for parsing and installing apk files.
+- Supported files: ApkFile, XapkFile, ApkmFile, ApksFile
+- Source code: https://github.com/david-lev/apkfile
+"""
+
 from __future__ import annotations
 import hashlib
 import json
@@ -80,37 +86,40 @@ _dpis = {
 
 
 def install_apks(
-        apks: Union[str, Iterable[str]],
+        apks: Union[str, Iterable[str], _BaseApkFile, Iterable[ApkFile]],
         check: bool = True,
         upgrade: bool = False,
-        device_id: Optional[str] = None,
+        devices: Optional[Union[str, Iterable[str]]] = None,
         skip_broken: bool = False,
         installer: Optional[str] = None,
         originating_uri: Optional[str] = None,
         adb_path: Optional[str] = None,
         aapt_path: Optional[str] = None
-):
+) -> Dict[str, Dict[str, int]]:
     """
     Install apk(s) on android device(s) using `adb <https://developer.android.com/studio/command-line/adb>`_.
 
     The ``check`` argument is True by default, which means that the app(s) will be checked if they are compatible with the device(s) before installing them.
-    The check is done by comparing ``min_sdk_version``, ``abis``, ``screen_densities`` and ``locales`` with the device(s) capabilities.
+    The check is done by comparing ``min_sdk_version``, ``abis`` and filtering out ``dpis`` and ``locales`` .
 
     >>> install_apks('path/to/apk.apk')
-    >>> install_apks(['path/to/base.apk', 'path/to/split.apk'], device_id='emulator-5554', skip_broken=True)
+    >>> install_apks(['path/to/base.apk', 'path/to/split.apk'], devices='emulator-5554', skip_broken=True)
     >>> install_apks('path/to/apk.apk', check=False, installer='com.android.vending', upgrade=True)
     >>> install_apks('path/to/apk.apk', adb_path='/path/to/adb', aapt_path='/path/to/aapt')
 
     Args:
-        apks: The path to the apk or a list of paths to the apks.
-        check: Check if the app is compatible with the device.
-        upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
-        device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
-        skip_broken: Skip broken apks.
+        apks: The path(s) to the apk(s) or an ``ApkFile`` object(s).
+        check: Check if the app (and it's splits) are compatible with the device(s) before installing them. Default is ``True``.
+        upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``). Default is ``False``.
+        devices: The device(s) to install the apk(s) on. If not specified, all devices will be used.
+        skip_broken: Skip broken apks. Default is ``False``.
         installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
         originating_uri: The URI of the app that is performing the installation.
         adb_path: The path to the adb executable (If not specified, adb will be searched in the ``PATH``).
         aapt_path: The path to the aapt executable (If check is ``True``. If not specified, aapt will be searched in the ``PATH``).
+
+    Returns:
+        A dictionary with the device serial as the key and a dictionary with {apk_path: size} as the value.
 
     Raises:
         FileNotFoundError: If adb is not installed (or if ``check`` is ``True`` and aapt is not installed or the file does not exist).
@@ -123,13 +132,14 @@ def install_apks(
                                 'See https://developer.android.com/studio/command-line/adb')
 
     spargs = {'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'check': True}
-    if device_id is None:
+    if devices is None:
         devices = tuple(line.split("\t")[0] for line in subprocess.run(
             (adb, 'devices'), **spargs
         ).stdout.decode('utf-8').strip().split("\n")[1:] if line.endswith('device'))
     else:
-        devices = (device_id,)
+        devices = (devices,) if isinstance(devices, str) else devices
 
+    results = {}
     for device in devices:
         adb_args = (adb, '-s', device)
         tmp_path = subprocess.run(
@@ -138,14 +148,19 @@ def install_apks(
 
         if check:
             all_apks = []
-            for apk in ((apks,) if isinstance(apks, str) else apks):
+            for apk in ((apks,) if isinstance(apks, (str, ApkFile, _BaseZipApkFile)) else apks):
+                if isinstance(apk, ApkFile):
+                    all_apks.append(apk)
+                    continue
+                elif isinstance(apk, _BaseZipApkFile):
+                    all_apks.extend((apk.base, *apk.splits))
                 try:
                     all_apks.append(ApkFile(path=apk, aapt_path=aapt_path))
                 except FileExistsError:
                     if not skip_broken:
                         raise
             if not all_apks:  # all apks are broken
-                return
+                continue
             lang_splits = tuple(apk for apk in all_apks if apk.split_type == SplitType.LANGUAGE)
             dpi_splits = tuple(apk for apk in all_apks if apk.split_type == SplitType.DPI)
             abi_splits = tuple(apk for apk in all_apks if apk.split_type == SplitType.ABI)
@@ -204,10 +219,12 @@ def install_apks(
                 if closest_dpi is not None:
                     apks_to_install[split.path] = split.size
         else:
-            apks_to_install = {
-                apk_path: os.path.getsize(apk_path)
-                for apk_path in ((apks,) if isinstance(apks, str) else apks)
-            }
+            apks_to_install: Dict[str, int] = {}
+            for apk in ((apks,) if isinstance(apks, (str, ApkFile)) else apks):
+                if isinstance(apk, ApkFile):
+                    apks_to_install[apk.path] = apk.size
+                else:
+                    apks_to_install[apk] = os.path.getsize(apk)
         try:
             subprocess.run((*adb_args, 'push', *apks_to_install, tmp_path), **spargs)
             session_id = re.search(r'\d+', subprocess.run(
@@ -224,15 +241,32 @@ def install_apks(
                      str(size), session_id, str(idx), f'{tmp_path}/{basename}'), **spargs
                 )
             subprocess.run((*adb_args, 'shell', 'pm', 'install-commit', session_id), **spargs)
-
+            results[device] = apks_to_install
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to install apk on device {device}:\n"
                                f"{e.stdout.decode('utf-8') or e.stderr.decode('utf-8')}") from e
         finally:
             subprocess.run((*adb_args, 'shell', 'rm', '-rf', tmp_path), **spargs)
+        return results
 
 
-class InstallLocation(Enum):
+class _BaseEnum(str, Enum):
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.value == other
+        return super().__eq__(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}.{self.name}'
+
+
+class InstallLocation(_BaseEnum):
     """
     Where the application can be installed on external storage, internal only or auto.
 
@@ -251,19 +285,8 @@ class InstallLocation(Enum):
     def _missing_(cls, value):
         return cls.AUTO
 
-    def __eq__(self, other):
-        if isinstance(other, str):
-            return self.value == other
-        return super().__eq__(other)
 
-    def __hash__(self):
-        return hash(self.value)
-
-    def __repr__(self):
-        return f'InstallLocation.{self.name}'
-
-
-class Abi(Enum):
+class Abi(_BaseEnum):
     """
     Android supported ABIs.
 
@@ -299,17 +322,6 @@ class Abi(Enum):
     def _missing_(cls, value):
         return cls.UNKNOWN
 
-    def __eq__(self, other):
-        if isinstance(other, str):
-            return self.value == other
-        return super().__eq__(other)
-
-    def __hash__(self):
-        return hash(self.value)
-
-    def __repr__(self):
-        return f'Abi.{self.name}'
-
 
 _compatibility_map = {
     Abi.X86_64: frozenset({Abi.X86, Abi.ARM64, Abi.ARM7, Abi.ARM}),
@@ -321,7 +333,7 @@ _compatibility_map = {
 }
 
 
-class SplitType(Enum):
+class SplitType(_BaseEnum):
     """
     Split types.
 
@@ -356,6 +368,7 @@ _extraction_patterns = {
     'abis': r'native-code: \'([^\']+)\'',
     'icons': r'application-icon-([0-9]+):\'' + r'([^\']+)\'',
     'split_name': r'split=\'([^\']+)\'',
+    'debuggable': r'application-debuggable',
 }
 
 
@@ -367,7 +380,6 @@ class _BaseApkFile:
         'version_name',
         'min_sdk_version',
         'target_sdk_version',
-        'install_location',
         'labels',
         'permissions',
         'libraries',
@@ -377,9 +389,7 @@ class _BaseApkFile:
         'supports_any_density',
         'langs',
         'densities',
-        'split_name',
         'abis',
-        'icons',
         '_raw',
         '_aapt_path'
     )
@@ -388,7 +398,6 @@ class _BaseApkFile:
     version_name: Optional[str]
     min_sdk_version: Optional[int]
     target_sdk_version: Optional[int]
-    install_location: InstallLocation
     labels: Dict[str, str]
     permissions: Tuple[str]
     libraries: Tuple[str]
@@ -399,7 +408,6 @@ class _BaseApkFile:
     langs: Tuple[str]
     densities: Tuple[str]
     abis: Tuple[Abi]
-    icons: Dict[int, str]
     path: Union[str]
     size: int
     md5: str
@@ -428,7 +436,7 @@ class _BaseApkFile:
             self,
             check: bool = True,
             upgrade: bool = False,
-            device_id: Optional[str] = None,
+            devices: Optional[Union[str, Iterable[str]]] = None,
             skip_broken: bool = False,
             installer: Optional[str] = None,
             originating_uri: Optional[str] = None,
@@ -442,10 +450,10 @@ class _BaseApkFile:
         The check is done by comparing ``min_sdk_version``, ``abis``, ``screen_densities`` and ``locales`` with the device(s) capabilities.
 
         Args:
-            check: Check if the app is compatible with the device.
-            upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
-            device_id: The id of the device to install the apk on (If not specified, all connected devices will be used).
-            skip_broken: Skip broken apks.
+            check: Check if the app (and it's splits) are compatible with the device(s) before installing them. Default is ``True``.
+            upgrade: Whether to upgrade the app if it is already installed (``INSTALL_FAILED_ALREADY_EXISTS``). Default is ``False``.
+            devices: The device(s) to install the apk(s) on. If not specified, all devices will be used.
+            skip_broken: Skip broken apks. Default is ``False``.
             installer: The package name of the app that is performing the installation. (e.g. ``com.android.vending``)
             originating_uri: The URI of the app that is performing the installation.
             adb_path: The path to the adb executable (If not specified, adb will be searched in the ``PATH``).
@@ -455,11 +463,11 @@ class _BaseApkFile:
             FileNotFoundError: If adb is not installed (or if ``check`` is ``True`` and aapt is not installed or the file does not exist).
             RuntimeError: If the adb command failed.
         """
-        install_apks(
-            apks=self.path,
+        return install_apks(
+            apks=self,
             check=check,
             upgrade=upgrade,
-            device_id=device_id,
+            devices=devices,
             skip_broken=skip_broken,
             installer=installer,
             originating_uri=originating_uri,
@@ -482,7 +490,10 @@ class _BaseApkFile:
         """
         format_strings = re.findall(r'{([a-zA-Z_\d]+)}', name)
         attrs = {k: getattr(self, k) for k in format_strings if isinstance(getattr(self, k), (str, int))}
-        format_name = name.format(**attrs)
+        try:
+            format_name = name.format(**attrs)
+        except KeyError as e:
+            raise AttributeError(f"Attribute '{e.args[0]}' is not of type str or int")
         new_path = os.path.join(os.path.dirname(self.path), format_name)
         os.rename(self.path, new_path)
         self.path = new_path
@@ -535,6 +546,7 @@ class ApkFile(_BaseApkFile):
             `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
         split_name: The name of the split apk (if ``is_split``).
             `↗️ <https://developer.android.com/studio/build/configure-apk-splits.html>`_
+        debuggable: Whether the apk is debuggable.
 
         is_split: Whether the apk is a split apk.
         split_type: The type of the split apk. e.g. ABI, LANGUAGE, DPI.
@@ -543,7 +555,16 @@ class ApkFile(_BaseApkFile):
         md5: The MD5 hash of the apk file.
         sha256: The SHA256 hash of the apk file.
     """
+    __slots__ = (
+        'icons',
+        'install_location',
+        'split_name',
+        'debuggable'
+    )
+    icons: Dict[int, str]
+    install_location: InstallLocation
     split_name: Optional[str]
+    debuggable: bool
 
     def __init__(
             self,
@@ -602,6 +623,7 @@ class ApkFile(_BaseApkFile):
         self.split_name = data.get('split_name')[0] if data.get('split_name') else None
         self.abis = tuple(Abi(abi) for abi in re.split(r"'\s'", data['abis'][0])) if data.get('abis') else ()
         self.icons = {int(size): icon for size, icon in data.get('icons', {})}
+        self.debuggable = bool(data.get('debuggable'))
 
     @property
     def is_split(self) -> bool:
@@ -634,9 +656,15 @@ class ApkFile(_BaseApkFile):
         """
         self.as_zip_file().extractall(path=path, members=members)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self, only: Optional[str, Iterable[str]] = None) -> Dict[str, Any]:
         """Return a dict representation of the apk file."""
-        return {k: getattr(self, k) for k in self.__slots__ if not k.startswith('_')}
+        data = {k: getattr(self, k) for k in {*super().__slots__, *self.__slots__, *self.__class__.__slots__}
+                if not k.startswith('_') and (k in only if only else True)}
+        for p in ('is_split', 'split_type', 'size'):
+            if only and p not in only:
+                continue
+            data[p] = getattr(self, p)
+        return data
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(pkg={self.package_name!r}, version={self.version_code!r}" \
@@ -742,9 +770,10 @@ class _BaseZipApkFile(_BaseApkFile):
         for split in splits_paths:
             try:
                 splits.append(ApkFile(path=os.path.join(self._extract_path, split), aapt_path=self._aapt_path))
-            except FileExistsError:
+            except FileExistsError as e:
                 if not self._skip_broken_splits:
-                    raise
+                    raise FileExistsError(f'{e.args[0]}\nIf you want to skip broken splits,'
+                                          f' set `skip_broken_splits` to True.') from e
                 os.unlink(os.path.join(self._extract_path, split))
 
         self.splits = tuple(splits)
@@ -774,17 +803,19 @@ class _BaseZipApkFile(_BaseApkFile):
             delete_after_install: bool = False,
             check: bool = True,
             upgrade: bool = False,
-            device_id: Optional[str] = None,
+            devices: Optional[str] = None,
             installer: Optional[str] = None,
             originating_uri: Optional[str] = None,
             adb_path: Optional[str] = None,
             aapt_path: Optional[str] = None
     ):
-        self._extract()
-        install_apks(
-            apks=(self.base.path, *(split.path for split in self.splits)),
+        if check:
+            self._extract()
+        res = install_apks(
+            apks=self if check else filter(lambda x: x.endswith('.apk'), self._zipfile.namelist()),
+            check=check,
             upgrade=upgrade,
-            device_id=device_id,
+            devices=devices,
             installer=installer,
             originating_uri=originating_uri,
             adb_path=adb_path,
@@ -792,6 +823,31 @@ class _BaseZipApkFile(_BaseApkFile):
         )
         if delete_after_install:
             self.delete_extracted_files()
+        return res
+
+    def as_dict(self, recursive: bool = True, only: Optional[str, Iterable[str]] = None) -> Dict[str, Any]:
+        """
+        Convert the object to a dictionary.
+
+        Args:
+            recursive: True if you want to convert the object to a dictionary recursively.
+            only: The attributes you want to include in the dictionary.
+        """
+        result = {}
+        attrs = {*super().__slots__, *self.__slots__, *_BaseZipApkFile.__slots__}
+        if only:
+            attrs = attrs & ({only} if isinstance(only, str) else set(only))
+        for attr in attrs:
+            if attr == 'base':
+                if recursive:
+                    result[attr] = getattr(self, attr).as_dict()
+            elif attr == 'splits':
+                if recursive:
+                    result[attr] = [x.as_dict(only=only) for x in getattr(self, attr)]
+            elif not attr.startswith('_'):
+                result[attr] = getattr(self, attr)
+
+        return result
 
 
 class ApkmFile(_BaseZipApkFile):
@@ -817,8 +873,6 @@ class ApkmFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/studio/publish/versioning#minsdkversion>`_
         target_sdk_version: The API level on which the app is designed to run.
             `↗️ <https://developer.android.com/studio/publish/versioning#minsdkversion>`_
-        install_location: Where the application can be installed on external storage, internal only or auto.
-            `↗️ <https://developer.android.com/guide/topics/data/install-location>`_
         labels: A user-readable labels for the application.
             `↗️ <https://developer.android.com/guide/topics/manifest/application-element#:~:text=or%20getLargeMemoryClass().-,android%3Alabel,-A%20user%2Dreadable>`_
         permissions: A system permission that the user must grant in order for the app to operate correctly.
@@ -839,8 +893,6 @@ class ApkmFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/guide/topics/large-screens/support-different-screen-sizes>`_
         abis: Android supported ABIs.
             `↗️ <https://developer.android.com/ndk/guides/abis>`_
-        icons: Path's to the app icons.
-            `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
         app_name: The name of the app (from APKMirror).
         apkm_version: The version of the apkm file.
         path: The path to the apk file.
@@ -932,8 +984,6 @@ class XapkFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/studio/publish/versioning#minsdkversion>`_
         target_sdk_version: The API level on which the app is designed to run.
             `↗️ <https://developer.android.com/studio/publish/versioning#minsdkversion>`_
-        install_location: Where the application can be installed on external storage, internal only or auto.
-            `↗️ <https://developer.android.com/guide/topics/data/install-location>`_
         labels: A user-readable labels for the application.
             `↗️ <https://developer.android.com/guide/topics/manifest/application-element#:~:text=or%20getLargeMemoryClass().-,android%3Alabel,-A%20user%2Dreadable>`_
         permissions: A system permission that the user must grant in order for the app to operate correctly.
@@ -954,8 +1004,6 @@ class XapkFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/guide/topics/large-screens/support-different-screen-sizes>`_
         abis: Android supported ABIs.
             `↗️ <https://developer.android.com/ndk/guides/abis>`_
-        icons: Path's to the app icons.
-            `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
 
         xapk_version: The version of the xapk file.
         app_name: The name of the app (In APKPure, this is the name of the app in the xapk file).
@@ -1053,8 +1101,6 @@ class ApksFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/studio/publish/versioning#minsdkversion>`_
         target_sdk_version: The API level on which the app is designed to run.
             `↗️ <https://developer.android.com/studio/publish/versioning#minsdkversion>`_
-        install_location: Where the application can be installed on external storage, internal only or auto.
-            `↗️ <https://developer.android.com/guide/topics/data/install-location>`_
         labels: A user-readable labels for the application.
             `↗️ <https://developer.android.com/guide/topics/manifest/application-element#:~:text=or%20getLargeMemoryClass().-,android%3Alabel,-A%20user%2Dreadable>`_
         permissions: A system permission that the user must grant in order for the app to operate correctly.
@@ -1075,8 +1121,6 @@ class ApksFile(_BaseZipApkFile):
             `↗️ <https://developer.android.com/guide/topics/large-screens/support-different-screen-sizes>`_
         abis: Android supported ABIs.
             `↗️ <https://developer.android.com/ndk/guides/abis>`_
-        icons: Path's to the app icons.
-            `↗️ <https://developer.android.com/guide/topics/resources/providing-resources>`_
 
         meta_version: The version of the apks file.
         app_name: The name of the app (From SAI).

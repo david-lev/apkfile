@@ -19,6 +19,11 @@ setup(
     author='David Lev',
     license='MIT',
     keywords='apk, aapt, apkfile, apks, apkm, xapk',
+    entry_points={
+        'console_scripts': [
+            'apkfile=apkfile.cli:main',
+        ],
+    },
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',
