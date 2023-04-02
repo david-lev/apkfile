@@ -26,12 +26,18 @@ __all__ = [
     'get_raw_aapt',
     'Abi',
     'InstallLocation',
-    'SplitType'
+    'SplitType',
+    '__version__',
+    '__author__',
+    '__title__',
+    '__license__',
+    '__copyright__',
 ]
 __copyright__ = f'Copyright {datetime.now().year} david-lev'
 __license__ = 'MIT'
 __title__ = 'apkfile'
 __version__ = '0.1.6'
+__author__ = 'david-lev'
 
 
 def _get_program_path(program: str) -> str:
@@ -118,9 +124,6 @@ def install_apks(
         originating_uri: The URI of the app that is performing the installation.
         adb_path: The path to the adb executable (If not specified, adb will be searched in the ``PATH``).
         aapt_path: The path to the aapt executable (If check is ``True``. If not specified, aapt will be searched in the ``PATH``).
-
-    Returns:
-        A dictionary with the device serial as the key and a dictionary with {apk_path: size} as the value.
 
     Raises:
         FileNotFoundError: If adb is not installed (or if ``check`` is ``True`` and aapt is not installed or the file does not exist).
@@ -248,7 +251,7 @@ def install_apks(
                                f"{e.stdout.decode('utf-8') or e.stderr.decode('utf-8')}") from e
         finally:
             subprocess.run((*adb_args, 'shell', 'rm', '-rf', tmp_path), **spargs)
-        return results
+    return results
 
 
 class _BaseEnum(str, Enum):
@@ -313,11 +316,6 @@ class Abi(_BaseEnum):
         if self == other:
             return True
         return other in _compatibility_map[self]
-
-    @classmethod
-    def all(cls) -> Tuple['Abi']:
-        """Returns all the supported ABIs."""
-        return tuple(a for a in cls if a != cls.UNKNOWN)
 
     @classmethod
     def _missing_(cls, value):
