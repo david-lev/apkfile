@@ -3,16 +3,14 @@ import os
 import shutil
 import sys
 import tempfile
-from io import StringIO
-from typing import Type, Callable, Dict, Union
+from typing import Callable, Dict, Union
 
-from apkfile import ApkFile, ApkmFile, XapkFile, ApksFile, __version__, _get_program_path, _BaseApkFile, \
-    _BaseZipApkFile, install_apks
+from apkfile import ApkFile, ApkmFile, XapkFile, ApksFile, __version__, _BaseApkFile, _BaseZipApkFile, install_apks
 
 
 def main():
-    apk_types: Dict[str, Callable[..., _BaseApkFile]] = {'apk': ApkFile, 'xapk': XapkFile, 'apkm': ApkmFile,
-                                                         'apks': ApksFile}
+    apk_types: Dict[str, Callable[..., _BaseApkFile]] = \
+        {'apk': ApkFile, 'xapk': XapkFile, 'apkm': ApkmFile, 'apks': ApksFile}
     parser = argparse.ArgumentParser(
         prog='apkfile',
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -28,16 +26,17 @@ def main():
         default='auto',
         help='Type of apk file. Default: auto, which will try to guess the type from the file extension'
     )
+    parser.add_argument('-j', '--json', help='Print info in json format', action='store_true')
+    parser.add_argument('--recursive', help='Print info recursively', action='store_false')
+    parser.add_argument('--only', help='Only print the specified fields', nargs='+')
     parser.add_argument('--aapt', type=str, help='Path to aapt executable')
     parser.add_argument('-v', '--version', action='version', version=__version__)
-    subparsers = parser.add_subparsers(dest='action', help='Action to perform', required=False)
-    info_parser = subparsers.add_parser('info', help='Print info')
-    info_parser.add_argument('-j', '--json', help='Print info in json format', action='store_true')
-    info_parser.add_argument('--recursive', help='Print info recursively', action='store_false')
-    info_parser.add_argument('--only', help='Only print the specified fields', nargs='+')
+    parser.add_argument('-sb', '--skip-broken', help='Skip broken splits', action='store_true')
+    parser.add_argument('-o', '--output', type=str, help='Output directory', dest='output')
 
-    rename_parser = subparsers.add_parser(
-        'rename', help='Rename file (e.g. {package_name}-{version_code}.apk)')
+    subparsers = parser.add_subparsers(dest='action', help='Action to perform', required=False)
+
+    rename_parser = subparsers.add_parser('rename', help='Rename file (e.g. {package_name}-{version_code}.apk)')
     rename_parser.add_argument('new_name', type=str, help='New name for renamed apk file')
 
     install_parser = subparsers.add_parser('install', help='Install the file')
@@ -64,11 +63,8 @@ def main():
         dest='installer',
         help='Installer package name'
     )
-    install_parser.add_argument('-sb', '--skip-broken', help='Skip broken splits', action='store_true')
     install_parser.add_argument('--adb', type=str, help='Path to adb executable')
-
-    extract_parser = subparsers.add_parser('extract', help='Extract apks')
-    extract_parser.add_argument('-o', '--output', type=str, help='Output directory for extracted files')
+    subparsers.add_parser('extract', help='Extract apks')
 
     args = parser.parse_args()
 
@@ -83,24 +79,39 @@ def main():
         else:
             obj = apk_types[args.type]
         obj_args = {'path': args.file, 'aapt_path': args.aapt}
-        if isinstance(obj, _BaseZipApkFile):
-            obj_args.update({'skip_broken_splits': args.skip_broken, 'extract_dir': args.output or tmp_dir})
+        if issubclass(obj, _BaseZipApkFile):
+            obj_args.update({'skip_broken_splits': args.skip_broken, 'extract_path': args.output or tmp_dir})
         apk: Union[ApkFile, _BaseZipApkFile] = obj(**obj_args)
 
-        if args.action in ('info', None):
-            import json
-            data = apk.as_dict(
-                only=args.only, **({'recursive': args.recursive} if isinstance(apk, _BaseZipApkFile) else {}))
+        if args.action is None:
             if args.json:
-                print(json.dumps(data, indent=4))
+                import json
+                print(json.dumps(apk.as_dict(
+                    only=args.only, **({'recursive': args.recursive} if isinstance(apk, _BaseZipApkFile) else {})),
+                    indent=4,
+                    ensure_ascii=False
+                ))
             else:
-                print(_convert_dict_to_string(data))
+                print(
+                    f"File: {apk.path}",
+                    f"App name: {apk.app_name if hasattr(apk, 'app_name') else (apk.labels.get('en', list(apk.labels.values())[0] if apk.labels else 'Unknown'))}",
+                    f"Package name: {apk.package_name}",
+                    f"Version code: {apk.version_code}",
+                    f"Version name: {apk.version_name}",
+                    f"Min SDK: {apk.min_sdk_version}",
+                    f"Target SDK: {apk.target_sdk_version}",
+                    f"Abis: {', '.join(apk.abis) if apk.abis else 'All'}",
+                    f"Supported screens: {', '.join(apk.supported_screens) if apk.supported_screens else 'None'}",
+                    f"Launchable activity: {apk.launchable_activity}",
+                    f"Splits: {', '.join(s.split_name for s in apk.splits) if hasattr(apk, 'splits') else 'None'}",
+                    sep='\n'
+                )
         elif args.action == 'rename':
             apk.rename(args.new_name)
             print(f"File renamed to '{apk.path}'")
         elif args.action == 'install':
-            print(f'Installing {apk.package_name} ({apk.version_code})')
-            install_apks(
+            print(f'Installing {apk.package_name} on {args.devices or "all devices"}: ({apk.size / 1024 / 1024:.2f} MB)')
+            res = install_apks(
                 apks=apk,
                 devices=args.devices,
                 skip_broken=args.skip_broken,
@@ -108,6 +119,12 @@ def main():
                 adb_path=args.adb,
                 aapt_path=args.aapt
             )
+            if args.json:
+                import json
+                print(json.dumps(res, indent=4))
+            else:
+                for device, device_res in res.items():
+                    print(f"[{device}] {', '.join(device_res.keys())}")
         elif args.action == 'extract':
             apk.extract(args.output)
     except Exception as e:
@@ -115,34 +132,6 @@ def main():
         sys.exit(1)
     finally:
         shutil.rmtree(tmp_dir)
-
-
-def _convert_dict_to_string(d, indent=0):
-    output = StringIO()
-    for key, value in d.items():
-        camel_key = str(key).replace('_', ' ').title()
-        output.write('  ' * indent + camel_key + ': ')
-        if isinstance(value, str) or isinstance(value, int):
-            output.write(str(value))
-        elif isinstance(value, bool):
-            output.write('yes' if value else 'no')
-        elif isinstance(value, list) or isinstance(value, tuple):
-            if len(value) == 0:
-                output.write('\n')
-            else:
-                output.write('\n')
-                for elem in value:
-                    if isinstance(elem, (dict, list, tuple)):
-                        output.write('  ' * (indent+1))
-                        output.write(_convert_dict_to_string(elem, indent+1))
-                    else:
-                        output.write('  ' * (indent+1))
-                        output.write(str(elem) + '\n')
-        elif isinstance(value, dict):
-            output.write('\n')
-            output.write(_convert_dict_to_string(value, indent+1))
-        output.write('\n')
-    return output.getvalue()
 
 
 if __name__ == '__main__':
