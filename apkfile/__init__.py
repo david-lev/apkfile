@@ -25,7 +25,7 @@ __all__ = [
 __copyright__ = f'Copyright {datetime.now().year} david-lev'
 __license__ = 'MIT'
 __title__ = 'apkfile'
-__version__ = '0.1.6'
+__version__ = '0.1.7'
 
 
 def _get_program_path(program: str) -> str:
