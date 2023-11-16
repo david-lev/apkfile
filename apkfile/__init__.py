@@ -353,7 +353,7 @@ _extraction_patterns = {
     'supports_any_density': r'supports-any-density: \'([^\']+)\'',
     'langs': r'locales: \'([a-zA-Z0-9\'\s\-\_]+)\'',
     'densities': r'densities: \'([0-9\'\s]+)\'',
-    'abis': r'native-code: \'([^\']+)\'',
+    'abis': r'native-code: (.*)',
     'icons': r'application-icon-([0-9]+):\'' + r'([^\']+)\'',
     'split_name': r'split=\'([^\']+)\'',
 }
@@ -581,7 +581,6 @@ class ApkFile(_BaseApkFile):
             raise
         self._raw = raw
         data = {name: re.findall(pattern, raw) for name, pattern in _extraction_patterns.items()}
-
         self.package_name = data['package_name'][0]
         self.version_code = int(data['version_code'][0])
         self.version_name = (data.get('version_name') or (None,))[0]
@@ -600,7 +599,7 @@ class ApkFile(_BaseApkFile):
                            re.match(r'^[\dA-Za-z\-]+$', lang)) if data.get('langs') else ()
         self.densities = tuple(str(d) for d in re.split(r"'\s'", data['densities'][0])) if data.get('densities') else ()
         self.split_name = data.get('split_name')[0] if data.get('split_name') else None
-        self.abis = tuple(Abi(abi) for abi in re.split(r"'\s'", data['abis'][0])) if data.get('abis') else ()
+        self.abis = tuple(Abi(abi.replace("'", "")) for abi in re.split(r"'\s'", data['abis'][0])) if data.get('abis') else ()
         self.icons = {int(size): icon for size, icon in data.get('icons', {})}
 
     @property
