@@ -1,4 +1,11 @@
-## ⛏️ [apkfile](https://github.com/david-lev/apkfile) • Python library for handling APK, APKM, XAPK, and APKS files
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/david-lev/apkfile/main/assets/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/david-lev/apkfile/main/assets/logo-light.svg" width="96" alt="apkfile logo">
+  </picture>
+</p>
+
+## [apkfile](https://github.com/david-lev/apkfile) • Python library for handling APK, APKM, XAPK, and APKS files
 
 <p align="center">
   <a href="https://pypi.org/project/apkfile/"><img src="https://img.shields.io/pypi/v/apkfile?color=%2334D058&label=pypi" alt="PyPI Version"/></a>
