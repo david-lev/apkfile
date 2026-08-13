@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1]
+
+Documentation-only release (no code changes) — republished so PyPI's project page picks up the refreshed
+README.
+
+- Added a logo and a fuller badge row (downloads, tests, coverage, pre-commit.ci, license, code quality) to
+  the README.
+- Trimmed the top-of-README description down to what the library does, moving the implementation detail
+  (androguard, no external binary) into the existing "How this library works" section further down.
+
 ## [1.0.0]
 
 ### Breaking changes

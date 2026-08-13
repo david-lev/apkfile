@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-## [apkfile](https://github.com/david-lev/apkfile) • Python library for handling APK, APKM, XAPK, and APKS files
+## [apkfile](https://github.com/david-lev/apkfile) • Read, inspect, and install Android app packages
 
 <p align="center">
   <a href="https://pypi.org/project/apkfile/"><img src="https://img.shields.io/pypi/v/apkfile?color=%2334D058&label=pypi" alt="PyPI Version"/></a>
@@ -21,9 +21,7 @@
 apkfile reads metadata out of Android `.apk`, `.apkm`, `.xapk`, and `.apks` files — package name, version,
 permissions, supported ABIs/languages/densities, icons, signing certificates, manifest security posture
 (exported components, deep links, dangerous permissions), size/DEX composition, and more — and can install
-them to a connected device over `adb`, or diff two apks against each other. **No external binary is
-required**: parsing is done in-process with [androguard](https://github.com/androguard/androguard), not by
-shelling out to Google's deprecated `aapt` tool.
+them to a connected device over `adb`, or diff two apks against each other.
 
 ### Install
 

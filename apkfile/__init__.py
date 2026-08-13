@@ -73,4 +73,4 @@ __all__ = [
 __copyright__ = f"Copyright {datetime.now(timezone.utc).year} David Lev"
 __license__ = "MIT"
 __title__ = "apkfile"
-__version__ = "1.0.0"
+__version__ = "1.0.1"

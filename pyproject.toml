@@ -8,7 +8,7 @@ module-root = ""
 
 [project]
 name = "apkfile"
-version = "1.0.0"
+version = "1.0.1"
 description = "Python library for handling APK, APKM, XAPK, and APKS files"
 readme = "README.md"
 license = "MIT"
