@@ -5,6 +5,7 @@
   <a href="https://pepy.tech/project/apkfile"><img src="https://static.pepy.tech/badge/apkfile" alt="Downloads"/></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.10%2B-3776ab?color=%2334D058" alt="Python Versions"/></a>
   <a href="https://github.com/david-lev/apkfile/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/david-lev/apkfile/tests.yml?label=tests" alt="Tests"/></a>
+  <a href="https://results.pre-commit.ci/latest/github/david-lev/apkfile/main"><img src="https://results.pre-commit.ci/badge/github/david-lev/apkfile/main.svg" alt="pre-commit.ci status"/></a>
   <a href="https://codecov.io/gh/david-lev/apkfile"><img src="https://codecov.io/gh/david-lev/apkfile/graph/badge.svg" alt="Coverage"/></a>
   <a href="https://github.com/david-lev/apkfile/blob/main/LICENSE"><img src="https://img.shields.io/github/license/david-lev/apkfile?color=%2334D058" alt="License"/></a>
   <a href="https://www.codefactor.io/repository/github/david-lev/apkfile/overview/main"><img src="https://www.codefactor.io/repository/github/david-lev/apkfile/badge/main" alt="Code Quality"/></a>
