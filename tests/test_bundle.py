@@ -67,6 +67,25 @@ def test_apkm_labels_base_wins_over_splits_on_conflict(
     assert apkm.labels[""] == "Polite Droid"
 
 
+def test_apkm_signing_and_security_delegate_to_base(
+    make_apkm: Callable[..., str],
+) -> None:
+    apkm = ApkmFile(make_apkm())
+    assert apkm.signing == apkm.base.signing
+    assert apkm.security == apkm.base.security
+
+
+def test_apkm_size_breakdown_and_dex_info_aggregate_base_and_splits(
+    make_apkm: Callable[..., str],
+) -> None:
+    apkm = ApkmFile(make_apkm())
+    assert (
+        apkm.size_breakdown == apkm.base.size_breakdown + apkm.splits[0].size_breakdown
+    )
+    assert apkm.dex_info == apkm.base.dex_info + apkm.splits[0].dex_info
+    assert apkm.dex_info.dex_count == 2
+
+
 def test_apkm_icon(make_apkm: Callable[..., str]) -> None:
     apkm = ApkmFile(make_apkm())
     assert apkm.icon_bytes == b"fake-icon"
@@ -146,7 +165,7 @@ def test_apkm_install_extracts_to_temp_dir_and_calls_install_apks(
     assert kwargs["upgrade"] is True
     apk_paths = kwargs["apks"]
     assert len(apk_paths) == 2  # base + 1 split
-    assert all(p.endswith(".apk") for p in apk_paths)
+    assert all(p.suffix == ".apk" for p in apk_paths)
 
 
 def test_apkm_as_dict_and_repr(make_apkm: Callable[..., str]) -> None:
@@ -166,6 +185,18 @@ def test_xapk_basic_fields(make_xapk: Callable[..., str]) -> None:
     assert len(xapk.splits) == 1
 
 
+def test_xapk_signing_security_size_dex(make_xapk: Callable[..., str]) -> None:
+    xapk = XapkFile(make_xapk())
+    assert xapk.signing == xapk.base.signing
+    assert xapk.security == xapk.base.security
+    assert (
+        xapk.size_breakdown == xapk.base.size_breakdown + xapk.splits[0].size_breakdown
+    )
+    assert xapk.dex_info == xapk.base.dex_info + xapk.splits[0].dex_info
+    assert xapk.dex_info.dex_count == 2
+    assert "android.permission.READ_CALENDAR" in xapk.security.dangerous_permissions
+
+
 def test_apks_v2(make_apks: Callable[..., str]) -> None:
     apks = ApksFile(make_apks(meta_version=2))
     assert apks.package_name == "com.politedroid"
@@ -177,6 +208,17 @@ def test_apks_v1_fallback(make_apks: Callable[..., str]) -> None:
     apks = ApksFile(make_apks(meta_version=1))
     assert apks.package_name == "com.politedroid"
     assert apks.meta_version == 1
+
+
+def test_apks_signing_security_size_dex(make_apks: Callable[..., str]) -> None:
+    apks = ApksFile(make_apks())
+    assert apks.signing == apks.base.signing
+    assert apks.signing.is_debug_signed is False
+    assert apks.security == apks.base.security
+    assert (
+        apks.size_breakdown == apks.base.size_breakdown + apks.splits[0].size_breakdown
+    )
+    assert apks.dex_info == apks.base.dex_info + apks.splits[0].dex_info
 
 
 def test_missing_base_apk_entry_raises_lazily(
@@ -222,9 +264,9 @@ def test_icon_bytes_is_none_when_archive_has_no_icon(
 
 def test_bundle_rename(make_apkm: Callable[..., str]) -> None:
     apkm = ApkmFile(make_apkm())
-    original_dir = apkm.path.rsplit("/", 1)[0]
+    original_dir = apkm.path.parent
     apkm.rename("{package_name}-{version_code}.apkm")
-    assert apkm.path == f"{original_dir}/com.politedroid-4.apkm"
+    assert apkm.path == original_dir / "com.politedroid-4.apkm"
     # the renamed file is still readable (zip handle was reopened against the new path).
     assert apkm.base.package_name == "com.politedroid"
 

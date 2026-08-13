@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import io
-import os
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -13,7 +13,7 @@ from apkfile.exceptions import ApkFileError, InvalidApkError
 
 def test_politedroid_basic_fields(politedroid_path: str) -> None:
     apk = ApkFile(politedroid_path)
-    assert apk.path == politedroid_path
+    assert apk.path == Path(politedroid_path)
     assert apk.package_name == "com.politedroid"
     assert apk.version_code == 4
     assert apk.version_name == "1.3"
@@ -87,7 +87,8 @@ def test_in_memory_apk_has_no_path_until_saved(
 
     target = tmp_path / "saved.apk"
     apk.save(target)
-    assert apk.path == str(target)
+    assert apk.path == target
+    assert isinstance(apk.path, Path)
     assert target.read_bytes() == politedroid_bytes
 
 
@@ -102,7 +103,7 @@ def test_rename_formats_from_attributes(tmp_path, politedroid_bytes: bytes) -> N
     src.write_bytes(politedroid_bytes)
     apk = ApkFile(src)
     apk.rename("{package_name}-{version_code}.apk")
-    assert apk.path == str(tmp_path / "com.politedroid-4.apk")
+    assert apk.path == tmp_path / "com.politedroid-4.apk"
     assert (tmp_path / "com.politedroid-4.apk").exists()
 
 
@@ -142,7 +143,7 @@ def test_install_with_path_delegates_to_install_apks(
     apk = ApkFile(politedroid_path)
     apk.install(upgrade=True)
     mock_install.assert_called_once_with(
-        apks=politedroid_path,
+        apks=Path(politedroid_path),
         check=True,
         upgrade=True,
         device_id=None,
@@ -161,8 +162,8 @@ def test_install_without_path_writes_to_temp_file_first(
     apk.install()
     assert mock_install.call_count == 1
     tmp_path = mock_install.call_args.kwargs["apks"]
-    assert tmp_path.endswith("politedroid.apk")
+    assert tmp_path.name == "politedroid.apk"
     # the temp dir is cleaned up once install() returns.
-    assert not os.path.exists(tmp_path)
+    assert not tmp_path.exists()
     # the object itself is untouched by the temporary write.
     assert apk.path is None

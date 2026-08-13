@@ -5,10 +5,11 @@
 [![PyPI Version](https://badge.fury.io/py/apkfile.svg)](https://pypi.org/project/apkfile/)
 
 apkfile reads metadata out of Android `.apk`, `.apkm`, `.xapk`, and `.apks` files — package name, version,
-permissions, supported ABIs/languages/densities, icons, and more — and can install them to a connected device
-over `adb`. **No external binary is required**: parsing is done in-process with
-[androguard](https://github.com/androguard/androguard), not by shelling out to Google's deprecated `aapt`
-tool.
+permissions, supported ABIs/languages/densities, icons, signing certificates, manifest security posture
+(exported components, deep links, dangerous permissions), size/DEX composition, and more — and can install
+them to a connected device over `adb`, or diff two apks against each other. **No external binary is
+required**: parsing is done in-process with [androguard](https://github.com/androguard/androguard), not by
+shelling out to Google's deprecated `aapt` tool.
 
 ### Install
 
@@ -28,6 +29,16 @@ apk = ApkFile("/home/david/Downloads/wa.apk")
 print(apk.package_name, apk.version_name, apk.version_code)
 print(apk.as_dict())
 
+# Signing certificates, manifest security posture, size/DEX composition
+print(apk.signing.is_debug_signed, [c.sha256 for c in apk.signing.all_certificates])
+print(apk.security.dangerous_permissions, apk.security.unprotected_exported_components)
+print(apk.size_breakdown, apk.dex_info)
+
+# Diff two apks (e.g. two versions of the same app)
+old, new = ApkFile("wa-1.apk"), ApkFile("wa-2.apk")
+result = old.diff(new)
+print(result.permissions_added, result.size_delta, result.signing_changed)
+
 # Get apkm info — base/splits are read lazily, straight out of the archive
 apkm = ApkmFile("/home/david/Downloads/chrome.apkm")
 for split in apkm.splits:
@@ -46,8 +57,9 @@ print(apks.base.permissions, apks.md5, apks.sha256)
 ### CLI
 
 ```bash
-apkfile info app.apk          # print an apk/bundle's metadata as JSON
-apkfile install app.apk       # install to connected device(s)
+apkfile info app.apk              # print an apk/bundle's metadata as JSON
+apkfile diff old.apk new.apk      # print the differences between two apks/bundles as JSON
+apkfile install app.apk           # install to connected device(s)
 ```
 
 ### How this library works
@@ -71,6 +83,18 @@ install beyond apkfile itself.
 If you want to use `.install()`, you need [adb](https://developer.android.com/studio/command-line/adb).
 
 - You can manually provide a path to `adb`: `apk.install(adb_path="/path/to/adb")`.
+
+### Migrating from 1.0
+
+- `ApkFile.path` (and every bundle's `.path`) is now a `pathlib.Path`, not a `str`. Comparisons against a
+  bare string (`apk.path == "/some/path"`) no longer match — compare against `Path("/some/path")`, or use
+  `str(apk.path)`.
+- New: `.signing` (`SigningInfo` — signing scheme(s) + certificate(s)), `.security` (`SecurityInfo` —
+  permissions with AOSP protection levels, exported components, deep links, `debuggable`/`allowBackup`/
+  cleartext-traffic flags), `.size_breakdown` (`SizeBreakdown` — size by dex/resources/native
+  libs/assets/...), `.dex_info` (`DexInfo` — method/class/string counts), and `.diff(other)` /
+  `apkfile.diff.diff(a, b)` for comparing two apks. All available on `ApkFile` and every bundle class (bundle
+  `.signing`/`.security` delegate to the base apk; `.size_breakdown`/`.dex_info` sum base + splits).
 
 ### Migrating from 0.x
 

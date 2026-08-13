@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 
 from ._apk import ApkFile
 from .abi import Abi
@@ -28,7 +29,7 @@ _DPI_BUCKETS = {
 
 
 def _find_adb(adb_path: str | os.PathLike[str] | None) -> str:
-    path = os.fspath(adb_path) if adb_path is not None else shutil.which("adb")
+    path = str(Path(adb_path)) if adb_path is not None else shutil.which("adb")
     if path is None:
         raise AdbNotFoundError(
             "adb is not installed or not in PATH. See https://developer.android.com/studio/command-line/adb"
@@ -38,9 +39,9 @@ def _find_adb(adb_path: str | os.PathLike[str] | None) -> str:
 
 def _apk_path(apk: ApkFile) -> str:
     """`apk.path` is only ever `None` for apks parsed from raw bytes; every apk here was
-    constructed straight from a real path, so this narrows `str | None` down to `str`."""
+    constructed straight from a real path, so this narrows `Path | None` down to `str`."""
     assert apk.path is not None
-    return apk.path
+    return str(apk.path)
 
 
 def _run(args: Sequence[str]) -> str:
@@ -99,9 +100,9 @@ def install_apks(
     """
     adb = _find_adb(adb_path)
     apk_paths = (
-        [os.fspath(apks)]
+        [str(Path(apks))]
         if isinstance(apks, (str, os.PathLike))
-        else [os.fspath(a) for a in apks]
+        else [str(Path(a)) for a in apks]
     )
 
     if device_id is None:
@@ -126,7 +127,7 @@ def install_apks(
             if not apks_to_install:
                 continue
         else:
-            apks_to_install = {path: os.path.getsize(path) for path in apk_paths}
+            apks_to_install = {path: Path(path).stat().st_size for path in apk_paths}
 
         try:
             _run((*adb_args, "push", *apks_to_install, tmp_dir))
@@ -155,7 +156,7 @@ def install_apks(
             session_id = session_match.group(0)
 
             for idx, (apk_path, size) in enumerate(apks_to_install.items()):
-                basename = os.path.basename(apk_path)
+                basename = Path(apk_path).name
                 _run(
                     (
                         *adb_args,

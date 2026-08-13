@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from typing import Any
 
 from ._apk import ApkFile
 from ._bundle import ApkmFile, ApksFile, XapkFile
+from .diff import diff as diff_apks
 from .install import install_apks
 
 _LOADERS: dict[str, Callable[[str], Any]] = {
@@ -36,6 +38,11 @@ def _cmd_info(args: argparse.Namespace) -> None:
     print(json.dumps(apk.as_dict(), indent=2, default=str))
 
 
+def _cmd_diff(args: argparse.Namespace) -> None:
+    a, b = _load(args.a), _load(args.b)
+    print(json.dumps(dataclasses.asdict(diff_apks(a, b)), indent=2, default=str))
+
+
 def _cmd_install(args: argparse.Namespace) -> None:
     install_apks(
         apks=args.paths,
@@ -52,6 +59,15 @@ def build_parser() -> argparse.ArgumentParser:
     info = subparsers.add_parser("info", help="Print an apk/bundle's metadata as JSON")
     info.add_argument("path", help="Path to a .apk/.apkm/.xapk/.apks file")
     info.set_defaults(func=_cmd_info)
+
+    diff = subparsers.add_parser(
+        "diff", help="Print the differences between two apks/bundles as JSON"
+    )
+    diff.add_argument("a", help="Path to the baseline .apk/.apkm/.xapk/.apks file")
+    diff.add_argument(
+        "b", help="Path to the .apk/.apkm/.xapk/.apks file to compare against a"
+    )
+    diff.set_defaults(func=_cmd_diff)
 
     install = subparsers.add_parser(
         "install", help="Install apk(s) to connected device(s)"

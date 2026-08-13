@@ -8,7 +8,18 @@ import loguru
 
 from ._apk import ApkFile
 from ._bundle import ApkmFile, ApksFile, XapkFile
+from ._security import (
+    ComponentType,
+    DeepLink,
+    ExportedComponent,
+    PermissionInfo,
+    ProtectionLevel,
+    SecurityInfo,
+)
+from ._signing import Certificate, SigningInfo, SigningScheme
+from ._size import DexInfo, SizeBreakdown
 from .abi import Abi
+from .diff import ApkDiff, diff
 from .enums import InstallLocation, SplitType
 from .exceptions import (
     AdbError,
@@ -27,15 +38,28 @@ __all__ = [
     "Abi",
     "AdbError",
     "AdbNotFoundError",
+    "ApkDiff",
     "ApkFile",
     "ApkFileError",
     "ApkmFile",
     "ApksFile",
+    "Certificate",
+    "ComponentType",
+    "DeepLink",
+    "DexInfo",
+    "ExportedComponent",
     "InstallLocation",
     "InvalidApkError",
     "InvalidBundleError",
+    "PermissionInfo",
+    "ProtectionLevel",
+    "SecurityInfo",
+    "SigningInfo",
+    "SigningScheme",
+    "SizeBreakdown",
     "SplitType",
     "XapkFile",
+    "diff",
     "install_apks",
 ]
 

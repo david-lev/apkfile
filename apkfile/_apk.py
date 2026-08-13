@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
 import os
@@ -12,13 +13,19 @@ import zipfile
 from collections.abc import Iterable
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from androguard.core.apk import APK as _AndroguardAPK
 
+from ._security import SecurityInfo, build_security_info
+from ._signing import SigningInfo, build_signing_info
+from ._size import DexInfo, SizeBreakdown, build_dex_info, build_size_breakdown
 from .abi import Abi
 from .enums import InstallLocation, SplitType, classify_split
 from .exceptions import ApkFileError, InvalidApkError
+
+if TYPE_CHECKING:
+    from .diff import ApkDiff
 
 __all__ = ["ApkFile"]
 
@@ -43,10 +50,17 @@ _PARSE_ERRORS = (
 )
 
 
-def _load_apk(source: str | bytes, *, raw: bool, display_name: str) -> _AndroguardAPK:
+def _jsonable(value: Any) -> Any:
+    """Recursively convert dataclass instances (e.g. :class:`SigningInfo`) into plain dicts/lists,
+    so :meth:`ApkFile.as_dict` output round-trips cleanly through ``json.dumps``."""
+    return dataclasses.asdict(value) if dataclasses.is_dataclass(value) else value
+
+
+def _load_apk(source: Path | bytes, *, raw: bool, display_name: str) -> _AndroguardAPK:
     try:
-        # androguard's own type hints only declare `filename: str`, but it accepts raw bytes
-        # too when `raw=True` (see its class docstring's `APK(read("myfile.apk"), raw=True)`).
+        # androguard's own type hints only declare `filename: str`, but it accepts a `Path`
+        # (confirmed hands-on) and raw bytes when `raw=True` (see its class docstring's
+        # `APK(read("myfile.apk"), raw=True)`).
         apk = _AndroguardAPK(source, raw=raw)  # ty: ignore[invalid-argument-type]
     except _PARSE_ERRORS as e:
         raise InvalidApkError(f"{display_name!r} is not a valid APK file: {e}") from e
@@ -100,10 +114,14 @@ class ApkFile:
         size: The file size in bytes.
         md5: The MD5 hash of the APK's bytes.
         sha256: The SHA256 hash of the APK's bytes.
+        signing: Signing scheme(s) and certificate(s) this APK was signed with.
+        security: Manifest security posture — permissions, exported components, deep links.
+        size_breakdown: On-disk size, broken down by content category (dex/resources/native libs/...).
+        dex_info: Method/class/string counts across the APK's ``classesN.dex`` files.
     """
 
     _apk: _AndroguardAPK
-    path: str | None
+    path: Path | None
 
     def __init__(self, path: str | os.PathLike[str]) -> None:
         """
@@ -114,9 +132,9 @@ class ApkFile:
             FileNotFoundError: If the file does not exist.
             InvalidApkError: If the file is not a valid APK.
         """
-        self.path = os.fspath(path)
-        self._name = os.path.basename(self.path)
-        self._apk = _load_apk(self.path, raw=False, display_name=self.path)
+        self.path = Path(path)
+        self._name = self.path.name
+        self._apk = _load_apk(self.path, raw=False, display_name=str(self.path))
 
     @classmethod
     def _from_bytes(cls, data: bytes, *, name: str) -> ApkFile:
@@ -302,13 +320,13 @@ class ApkFile:
     def size(self) -> int:
         """The file size in bytes."""
         if self.path is not None:
-            return os.path.getsize(self.path)
+            return self.path.stat().st_size
         return len(self.get_raw())
 
     def _hash(self, algorithm: str) -> str:
         digest = hashlib.new(algorithm)
         if self.path is not None:
-            with open(self.path, "rb") as f:
+            with self.path.open("rb") as f:
                 for chunk in iter(lambda: f.read(_HASH_CHUNK_SIZE), b""):
                     digest.update(chunk)
         else:
@@ -324,6 +342,33 @@ class ApkFile:
     def sha256(self) -> str:
         """The SHA256 hash of the APK's bytes."""
         return self._hash("sha256")
+
+    @cached_property
+    def signing(self) -> SigningInfo:
+        """This APK's signing scheme(s) and certificate(s)."""
+        return build_signing_info(self._apk)
+
+    @cached_property
+    def security(self) -> SecurityInfo:
+        """This APK's manifest security posture (permissions, exported components, deep links)."""
+        return build_security_info(self._apk, self._manifest_root)
+
+    @cached_property
+    def size_breakdown(self) -> SizeBreakdown:
+        """This APK's on-disk size, broken down by content category."""
+        with self.as_zip_file() as zf:
+            return build_size_breakdown(zf)
+
+    @cached_property
+    def dex_info(self) -> DexInfo:
+        """Method/class/string counts across this APK's ``classesN.dex`` files."""
+        return build_dex_info(self._apk)
+
+    def diff(self, other: ApkFile) -> ApkDiff:
+        """Compare this apk against ``other``. See :func:`apkfile.diff.diff`."""
+        from .diff import diff as _diff
+
+        return _diff(self, other)
 
     def as_zip_file(self) -> zipfile.ZipFile:
         """Get the apk as a :class:`zipfile.ZipFile` (from disk if :attr:`path` is set, else from memory)."""
@@ -353,8 +398,8 @@ class ApkFile:
         This is mainly useful for :class:`ApkFile` instances obtained from a bundle's ``base``/``splits``,
         which have ``path is None`` until saved.
         """
-        target = os.fspath(path)
-        Path(target).write_bytes(self.get_raw())
+        target = Path(path)
+        target.write_bytes(self.get_raw())
         self.path = target
 
     def rename(self, name: str) -> None:
@@ -381,9 +426,8 @@ class ApkFile:
                     f"{field!r} is not a str/int attribute of {self.__class__.__name__}"
                 )
             values[field] = value
-        new_path = os.path.join(os.path.dirname(self.path), name.format(**values))
-        os.rename(self.path, new_path)
-        self.path = new_path
+        new_path = self.path.parent / name.format(**values)
+        self.path = self.path.rename(new_path)
 
     def install(
         self,
@@ -428,8 +472,8 @@ class ApkFile:
             return
         with tempfile.TemporaryDirectory(prefix="apkfile-") as tmp_dir:
             name = self._name if self._name.endswith(".apk") else f"{self._name}.apk"
-            tmp_path = os.path.join(tmp_dir, name)
-            Path(tmp_path).write_bytes(self.get_raw())
+            tmp_path = Path(tmp_dir) / name
+            tmp_path.write_bytes(self.get_raw())
             install_apks(
                 apks=tmp_path,
                 check=check,
@@ -466,11 +510,15 @@ class ApkFile:
         "size",
         "md5",
         "sha256",
+        "signing",
+        "security",
+        "size_breakdown",
+        "dex_info",
     )
 
     def as_dict(self) -> dict[str, Any]:
         """Return a dict representation of the apk file."""
-        return {field: getattr(self, field) for field in self._FIELDS}
+        return {field: _jsonable(getattr(self, field)) for field in self._FIELDS}
 
     def __repr__(self) -> str:
         split = f", split={self.split_name!r}" if self.is_split else ""

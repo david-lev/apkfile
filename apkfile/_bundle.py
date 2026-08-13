@@ -10,10 +10,13 @@ import tempfile
 import zipfile
 from collections.abc import Iterable, Mapping
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from ._apk import ApkFile
+from ._apk import ApkFile, _jsonable
+from ._security import SecurityInfo
+from ._signing import SigningInfo
+from ._size import DexInfo, SizeBreakdown, sum_dex_infos, sum_size_breakdowns
 from .abi import Abi
 from .enums import InstallLocation
 from .exceptions import ApkFileError, InvalidApkError, InvalidBundleError
@@ -29,7 +32,7 @@ _ManifestAttr = tuple[str, type, bool]
 class _BaseBundle:
     """Shared implementation for ``.apkm``/``.xapk``/``.apks``."""
 
-    path: str
+    path: Path
     package_name: str
     version_code: int
     _base_name: str
@@ -55,6 +58,10 @@ class _BaseBundle:
         "size",
         "md5",
         "sha256",
+        "signing",
+        "security",
+        "size_breakdown",
+        "dex_info",
     )
     _EXTRA_FIELDS: tuple[str, ...] = ()
     _FALLBACK_ATTRS: frozenset[str] = frozenset(
@@ -71,7 +78,7 @@ class _BaseBundle:
         manifest_attrs: Mapping[str, _ManifestAttr],
         skip_broken_splits: bool = False,
     ) -> None:
-        self.path = os.fspath(path)
+        self.path = Path(path)
         self._zip = zipfile.ZipFile(self.path)
         try:
             with self._zip.open(manifest_name) as f:
@@ -127,7 +134,7 @@ class _BaseBundle:
             raise InvalidBundleError(
                 f"{self.path!r} has no base apk {self._base_name!r}"
             ) from e
-        return ApkFile._from_bytes(data, name=os.path.basename(self._base_name))
+        return ApkFile._from_bytes(data, name=PurePosixPath(self._base_name).name)
 
     @cached_property
     def splits(self) -> tuple[ApkFile, ...]:
@@ -141,7 +148,7 @@ class _BaseBundle:
             try:
                 splits.append(
                     ApkFile._from_bytes(
-                        self._zip.read(name), name=os.path.basename(name)
+                        self._zip.read(name), name=PurePosixPath(name).name
                     )
                 )
             except InvalidApkError:
@@ -162,7 +169,7 @@ class _BaseBundle:
         data = self.icon_bytes
         if data is None:
             raise ApkFileError(f"{self.path!r} has no icon")
-        Path(os.fspath(path)).write_bytes(data)
+        Path(path).write_bytes(data)
 
     # -- fields derived from base/splits (lazy: only extracted on first access) ---------------
 
@@ -239,15 +246,37 @@ class _BaseBundle:
         merged.update(self.base.labels)
         return merged
 
+    @cached_property
+    def signing(self) -> SigningInfo:
+        """The signing scheme(s) and certificate(s) the bundle's base apk was signed with."""
+        return self.base.signing
+
+    @cached_property
+    def security(self) -> SecurityInfo:
+        """The bundle's base apk's manifest security posture."""
+        return self.base.security
+
+    @cached_property
+    def size_breakdown(self) -> SizeBreakdown:
+        """On-disk size, broken down by content category, summed across the base apk + every split."""
+        return sum_size_breakdowns(
+            (self.base.size_breakdown, *(s.size_breakdown for s in self.splits))
+        )
+
+    @cached_property
+    def dex_info(self) -> DexInfo:
+        """Method/class/string counts summed across the base apk + every split."""
+        return sum_dex_infos((self.base.dex_info, *(s.dex_info for s in self.splits)))
+
     # -- file-ish operations -------------------------------------------------------------------
 
     @property
     def size(self) -> int:
-        return os.path.getsize(self.path)
+        return self.path.stat().st_size
 
     def _hash(self, algorithm: str) -> str:
         digest = hashlib.new(algorithm)
-        with open(self.path, "rb") as f:
+        with self.path.open("rb") as f:
             for chunk in iter(lambda: f.read(_HASH_CHUNK_SIZE), b""):
                 digest.update(chunk)
         return digest.hexdigest()
@@ -289,10 +318,9 @@ class _BaseBundle:
                     f"{field!r} is not a str/int attribute of {self.__class__.__name__}"
                 )
             values[field] = value
-        new_path = os.path.join(os.path.dirname(self.path), name.format(**values))
+        new_path = self.path.parent / name.format(**values)
         self._zip.close()
-        os.rename(self.path, new_path)
-        self.path = new_path
+        self.path = self.path.rename(new_path)
         self._zip = zipfile.ZipFile(self.path)
 
     def install(
@@ -328,14 +356,14 @@ class _BaseBundle:
 
         with tempfile.TemporaryDirectory(prefix="apkfile-") as tmp_dir:
             apk_paths = []
-            base_path = os.path.join(
-                tmp_dir, os.path.basename(self._base_name) or "base.apk"
+            base_path = Path(tmp_dir) / (
+                PurePosixPath(self._base_name).name or "base.apk"
             )
-            Path(base_path).write_bytes(self.base.get_raw())
+            base_path.write_bytes(self.base.get_raw())
             apk_paths.append(base_path)
             for i, split in enumerate(self.splits):
-                split_path = os.path.join(tmp_dir, split._name or f"split_{i}.apk")
-                Path(split_path).write_bytes(split.get_raw())
+                split_path = Path(tmp_dir) / (split._name or f"split_{i}.apk")
+                split_path.write_bytes(split.get_raw())
                 apk_paths.append(split_path)
 
             install_apks(
@@ -351,7 +379,7 @@ class _BaseBundle:
     def as_dict(self) -> dict[str, Any]:
         """Return a dict representation of the bundle."""
         return {
-            field: getattr(self, field)
+            field: _jsonable(getattr(self, field))
             for field in (*self._BASE_FIELDS, *self._EXTRA_FIELDS)
         }
 
