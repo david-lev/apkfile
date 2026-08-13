@@ -14,11 +14,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ._apk import ApkFile, _jsonable
+from ._resources import ScreenSize
 from ._security import SecurityInfo
 from ._signing import SigningInfo
 from ._size import DexInfo, SizeBreakdown, sum_dex_infos, sum_size_breakdowns
 from .abi import Abi
-from .enums import InstallLocation
+from .enums import FormFactor, InstallLocation
 from .exceptions import ApkFileError, InvalidApkError, InvalidBundleError
 
 __all__ = ["ApkmFile", "ApksFile", "XapkFile"]
@@ -44,6 +45,7 @@ class _BaseBundle:
         "version_name",
         "min_sdk_version",
         "target_sdk_version",
+        "max_sdk_version",
         "install_location",
         "labels",
         "permissions",
@@ -55,6 +57,7 @@ class _BaseBundle:
         "langs",
         "densities",
         "abis",
+        "form_factors",
         "size",
         "md5",
         "sha256",
@@ -92,6 +95,14 @@ class _BaseBundle:
                 f"{self.path!r} has an invalid {manifest_name!r} manifest"
             ) from e
 
+        def _coerce(typ: type, value: Any, *, key: str) -> Any:
+            try:
+                return typ(value)
+            except (ValueError, TypeError) as e:
+                raise InvalidBundleError(
+                    f"{self.path!r} manifest key {key!r} is {value!r}, not a valid {typ.__name__}"
+                ) from e
+
         # `version_name`/`min_sdk_version`/`target_sdk_version` fall back to the base apk's own
         # parsed value when the manifest doesn't carry them (see the cached_properties below),
         # so they're stashed in `_eager` instead of being set as plain (possibly-`None`) attrs.
@@ -100,13 +111,13 @@ class _BaseBundle:
             has_value = key in info and info[key] is not None
             if attr in self._FALLBACK_ATTRS:
                 if has_value:
-                    self._eager[attr] = typ(info[key])
+                    self._eager[attr] = _coerce(typ, info[key], key=key)
                 elif required:
                     raise InvalidBundleError(
                         f"{self.path!r} manifest is missing required key {key!r}"
                     )
             elif has_value:
-                setattr(self, attr, typ(info[key]))
+                setattr(self, attr, _coerce(typ, info[key], key=key))
             elif required:
                 raise InvalidBundleError(
                     f"{self.path!r} manifest is missing required key {key!r}"
@@ -188,11 +199,19 @@ class _BaseBundle:
         )
 
     @cached_property
+    def max_sdk_version(self) -> int | None:
+        return self.base.max_sdk_version
+
+    @cached_property
+    def form_factors(self) -> tuple[FormFactor, ...]:
+        return self.base.form_factors
+
+    @cached_property
     def install_location(self) -> InstallLocation:
         return self.base.install_location
 
     @cached_property
-    def supported_screens(self) -> tuple[str, ...]:
+    def supported_screens(self) -> tuple[ScreenSize, ...]:
         return self.base.supported_screens
 
     @cached_property

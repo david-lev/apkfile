@@ -48,9 +48,14 @@ class Abi(str, Enum):
         return f"{self.__class__.__name__}.{self.name}"
 
 
+# Each 64-bit ABI is backward compatible with its own 32-bit predecessor (arm64-v8a runs
+# armeabi-v7a/armeabi; x86_64 runs x86), but the ARM and x86 instruction-set families are NOT
+# cross-compatible on stock Android — there is no general-purpose ARM<->x86 translation layer in
+# AOSP (some OEM/emulator images ship one, e.g. libhoudini, but it isn't guaranteed and apkfile
+# doesn't assume it). See https://developer.android.com/ndk/guides/abis.
 _COMPATIBILITY_MAP: dict[Abi, frozenset[Abi]] = {
-    Abi.X86_64: frozenset({Abi.X86, Abi.ARM64, Abi.ARM7, Abi.ARM}),
-    Abi.X86: frozenset({Abi.ARM64, Abi.ARM7, Abi.ARM}),
+    Abi.X86_64: frozenset({Abi.X86}),
+    Abi.X86: frozenset(),
     Abi.ARM64: frozenset({Abi.ARM7, Abi.ARM}),
     Abi.ARM7: frozenset({Abi.ARM}),
     Abi.ARM: frozenset(),

@@ -39,6 +39,25 @@ old, new = ApkFile("wa-1.apk"), ApkFile("wa-2.apk")
 result = old.diff(new)
 print(result.permissions_added, result.size_delta, result.signing_changed)
 
+# A quick manifest security report
+for component in apk.security.unprotected_exported_components:
+    print(
+        f"{component.type.value} {component.name} is exported with no permission required"
+    )
+for name in apk.security.dangerous_permissions:
+    print(f"requests dangerous permission: {name}")
+
+# Check whether a split apk can run on a given device ABI
+from apkfile import Abi
+
+device_abi = Abi.ARM64
+print(all(device_abi.is_compatible_with(a) for a in apk.abis))
+
+# Icons are objects, not just paths -- pick one and extract it
+icon = apk.best_icon(max_dpi=320)
+icon.extract("icon.png")  # or icon.read_bytes()
+print(icon.density, icon.bucket)  # e.g. 320 DensityBucket.XHDPI
+
 # Get apkm info — base/splits are read lazily, straight out of the archive
 apkm = ApkmFile("/home/david/Downloads/chrome.apkm")
 for split in apkm.splits:
@@ -60,6 +79,7 @@ print(apks.base.permissions, apks.md5, apks.sha256)
 apkfile info app.apk              # print an apk/bundle's metadata as JSON
 apkfile diff old.apk new.apk      # print the differences between two apks/bundles as JSON
 apkfile install app.apk           # install to connected device(s)
+apkfile install app.apk --upgrade --installer com.android.vending --adb-path /path/to/adb
 ```
 
 ### How this library works
@@ -95,6 +115,27 @@ If you want to use `.install()`, you need [adb](https://developer.android.com/st
   libs/assets/...), `.dex_info` (`DexInfo` — method/class/string counts), and `.diff(other)` /
   `apkfile.diff.diff(a, b)` for comparing two apks. All available on `ApkFile` and every bundle class (bundle
   `.signing`/`.security` delegate to the base apk; `.size_breakdown`/`.dex_info` sum base + splits).
+- Two behavior-affecting bug fixes, verified against the official Android manifest/NDK docs:
+  - `Abi.is_compatible_with()` no longer claims `x86`/`x86_64` devices can run `arm`/`arm64` code — stock
+    Android has no built-in ARM↔x86 translation layer, so that was always wrong and could have caused
+    `install_apks()` to push an incompatible native-code split onto an x86 emulator.
+  - `InstallLocation`'s default (when `android:installLocation` isn't declared) is now `INTERNAL_ONLY`, per
+    [the docs](https://developer.android.com/guide/topics/manifest/manifest-element#install) — it was
+    previously (incorrectly) reported as `AUTO`.
+- `ExportedComponent` gained `read_permission`/`write_permission` (for `<provider>`'s `android:readPermission`
+  /`android:writePermission`), and a provider's default `exported` value is now resolved correctly — it
+  depends on `targetSdkVersion` (`True` up to API 16, `False` from API 17), unlike activities/services/
+  receivers, whose default instead depends on whether they declare an `<intent-filter>`.
+- `ApkFile.icons` is now `tuple[Icon, ...]` (was `dict[int, str]`) — each `Icon` has `.density`, `.bucket`
+  (a `DensityBucket`), `.path`, and self-serving `.read_bytes()`/`.extract(path)` methods. It's also complete
+  now: the old implementation missed `anydpi` (adaptive icon) and `nodpi` variants entirely. Use
+  `apk.best_icon(max_dpi=...)` to pick a single icon the way `androguard`/Android itself would.
+  `ApkFile.supported_screens` is now `tuple[ScreenSize, ...]` (was `tuple[str, ...]`).
+- New fields: `max_sdk_version`, `form_factors` (`tuple[FormFactor, ...]` — TV/wearable heuristics),
+  `SecurityInfo.implied_permissions` (permissions Android silently grants under legacy compatibility rules),
+  and on `Certificate`: `public_key_algorithm`/`public_key_bit_size`, `canonical_subject`/`canonical_issuer`
+  (Java-`X500Principal`-compatible identity strings, safe for comparison unlike `subject`/`issuer`), and on
+  `SigningInfo`: `has_duplicate_signature_ids` (a tamper/verifier-confusion smell).
 
 ### Migrating from 0.x
 

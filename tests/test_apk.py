@@ -18,7 +18,10 @@ def test_politedroid_basic_fields(politedroid_path: str) -> None:
     assert apk.version_code == 4
     assert apk.version_name == "1.3"
     assert apk.min_sdk_version == 3
-    assert apk.install_location == InstallLocation.AUTO
+    # politedroid.apk's manifest doesn't declare `android:installLocation` at all, so this
+    # exercises the documented default (`internalOnly`, NOT `auto`) -- see also
+    # test_install_location_defaults_to_internal_only_when_unset below.
+    assert apk.install_location == InstallLocation.INTERNAL_ONLY
     assert set(apk.permissions) == {
         "android.permission.READ_CALENDAR",
         "android.permission.RECEIVE_BOOT_COMPLETED",
@@ -34,8 +37,25 @@ def test_politedroid_basic_fields(politedroid_path: str) -> None:
 def test_politedroid_icons_and_densities(politedroid_path: str) -> None:
     apk = ApkFile(politedroid_path)
     assert apk.densities == (120, 160, 240, 320)
-    assert set(apk.icons) == {120, 160, 240, 320}
-    assert all(path.endswith("icon.png") for path in apk.icons.values())
+    assert {icon.density for icon in apk.icons} == {120, 160, 240, 320}
+    assert all(icon.path.endswith("icon.png") for icon in apk.icons)
+
+
+def test_max_sdk_version_and_form_factors_default_absent(politedroid_path: str) -> None:
+    apk = ApkFile(politedroid_path)
+    # politedroid.apk declares neither android:maxSdkVersion nor any TV/wearable uses-feature.
+    assert apk.max_sdk_version is None
+    assert apk.form_factors == ()
+
+
+def test_form_factors_detects_tv_and_wearable(mocker, politedroid_path: str) -> None:
+    from apkfile import FormFactor
+
+    apk = ApkFile(politedroid_path)
+    mocker.patch.object(apk._apk, "is_androidtv", return_value=False)
+    mocker.patch.object(apk._apk, "is_leanback", return_value=True)
+    mocker.patch.object(apk._apk, "is_wearable", return_value=True)
+    assert set(apk.form_factors) == {FormFactor.TV, FormFactor.WEARABLE}
 
 
 def test_minimal_apk_has_no_permissions_or_native_code(test_debug_path: str) -> None:
@@ -44,7 +64,7 @@ def test_minimal_apk_has_no_permissions_or_native_code(test_debug_path: str) -> 
     assert apk.permissions == ()
     assert apk.abis == ()
     assert apk.densities == ()
-    assert apk.icons == {}
+    assert apk.icons == ()
 
 
 def test_native_abis_detected_from_lib_folders(apk_with_native_libs: str) -> None:

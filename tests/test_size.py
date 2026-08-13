@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from apkfile import ApkFile
+from apkfile._size import build_dex_info
 
 
 def test_size_breakdown_categories_sum_to_total(politedroid_path: str) -> None:
@@ -57,3 +58,15 @@ def test_size_breakdown_and_dex_info_are_summable(
     assert dex_total.dex_count == 2
     assert dex_total.is_multidex is True
     assert dex_total.method_count == dex_a.method_count + dex_b.method_count
+
+
+def test_truncated_dex_is_skipped_not_raised(mocker, politedroid_path: str) -> None:
+    apk = ApkFile(politedroid_path)
+    real_dex = next(iter(apk._apk.get_all_dex()))
+    # too short to contain a full header (needs 112 bytes) -> would previously raise struct.error.
+    truncated = real_dex[:40]
+    mocker.patch.object(apk._apk, "get_all_dex", return_value=[real_dex, truncated])
+    dex_info = build_dex_info(apk._apk)
+    # only the valid dex is counted; the truncated one is skipped entirely.
+    assert dex_info.dex_count == 1
+    assert dex_info.method_count == 144

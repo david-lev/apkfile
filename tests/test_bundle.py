@@ -73,6 +73,9 @@ def test_apkm_signing_and_security_delegate_to_base(
     apkm = ApkmFile(make_apkm())
     assert apkm.signing == apkm.base.signing
     assert apkm.security == apkm.base.security
+    assert apkm.max_sdk_version == apkm.base.max_sdk_version
+    assert apkm.form_factors == apkm.base.form_factors
+    assert apkm.supported_screens == apkm.base.supported_screens
 
 
 def test_apkm_size_breakdown_and_dex_info_aggregate_base_and_splits(
@@ -111,6 +114,24 @@ def test_apkm_invalid_json_raises(tmp_path) -> None:
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("info.json", "{not valid json")
         z.writestr("base.apk", b"not-a-real-apk")
+    with pytest.raises(InvalidBundleError):
+        ApkmFile(path)
+
+
+def test_apkm_non_numeric_version_code_raises_invalid_bundle_error(
+    tmp_path, politedroid_bytes: bytes
+) -> None:
+    info = {
+        "app_name": "Polite Droid",
+        "apkm_version": 2,
+        "pname": "com.politedroid",
+        "versioncode": "not-a-number",  # should be an int
+        "min_api": 3,
+    }
+    path = tmp_path / "bad-version-code.apkm"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("info.json", json.dumps(info))
+        z.writestr("base.apk", politedroid_bytes)
     with pytest.raises(InvalidBundleError):
         ApkmFile(path)
 

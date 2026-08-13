@@ -49,6 +49,10 @@ def _cmd_install(args: argparse.Namespace) -> None:
         check=not args.no_check,
         upgrade=args.upgrade,
         device_id=args.device,
+        skip_broken=args.skip_broken,
+        installer=args.installer,
+        originating_uri=args.originating_uri,
+        adb_path=args.adb_path,
     )
 
 
@@ -81,6 +85,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install.add_argument(
         "--no-check", action="store_true", help="Skip device-compatibility checking"
+    )
+    install.add_argument(
+        "--skip-broken",
+        action="store_true",
+        help="Skip apks that fail to parse instead of raising (only relevant with --check)",
+    )
+    install.add_argument(
+        "--installer",
+        default=None,
+        help="Package name of the app performing the installation (e.g. com.android.vending)",
+    )
+    install.add_argument(
+        "--originating-uri",
+        default=None,
+        help="The URI of the app performing the installation",
+    )
+    install.add_argument(
+        "--adb-path", default=None, help="Path to the adb executable (if not in PATH)"
     )
     install.set_defaults(func=_cmd_install)
 

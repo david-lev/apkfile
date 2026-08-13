@@ -148,14 +148,21 @@ def _parse_dex_header(data: bytes) -> tuple[int, int, int]:
 
 
 def build_dex_info(apk: _AndroguardAPK) -> DexInfo:
-    """Build a :class:`DexInfo` by reading each dex file's header (no bytecode parsing)."""
+    """Build a :class:`DexInfo` by reading each dex file's header (no bytecode parsing).
+
+    A ``classesN.dex`` entry too short/corrupt to have a readable header (e.g. from a tampered or
+    truncated apk) is skipped rather than raising.
+    """
     dex_count = 0
     method_count = 0
     class_count = 0
     string_count = 0
     for data in apk.get_all_dex():
+        try:
+            strings, methods, classes = _parse_dex_header(data)
+        except struct.error:
+            continue
         dex_count += 1
-        strings, methods, classes = _parse_dex_header(data)
         string_count += strings
         method_count += methods
         class_count += classes

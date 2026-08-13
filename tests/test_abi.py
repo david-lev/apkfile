@@ -27,11 +27,11 @@ def test_abi_is_compatible_with_self() -> None:
     assert Abi.ARM7.is_compatible_with(Abi.ARM7)
 
 
-def test_64bit_device_runs_32bit_and_legacy_apks() -> None:
+def test_64bit_device_runs_32bit_and_legacy_apks_of_the_same_family() -> None:
+    # Backward compatibility only holds *within* an instruction-set family.
     assert Abi.ARM64.is_compatible_with(Abi.ARM7)
     assert Abi.ARM64.is_compatible_with(Abi.ARM)
     assert Abi.X86_64.is_compatible_with(Abi.X86)
-    assert Abi.X86_64.is_compatible_with(Abi.ARM64)
 
 
 def test_32bit_device_cannot_run_64bit_apks() -> None:
@@ -43,6 +43,23 @@ def test_arm_has_no_compatible_targets() -> None:
     # ARM is the narrowest ABI in the compatibility map: nothing lists it as a target.
     assert not Abi.ARM.is_compatible_with(Abi.X86)
     assert not Abi.ARM.is_compatible_with(Abi.ARM64)
+
+
+def test_x86_and_arm_families_are_not_cross_compatible() -> None:
+    # Stock Android has no ARM<->x86 translation layer (see developer.android.com/ndk/guides/abis).
+    assert not Abi.X86_64.is_compatible_with(Abi.ARM64)
+    assert not Abi.X86_64.is_compatible_with(Abi.ARM7)
+    assert not Abi.X86_64.is_compatible_with(Abi.ARM)
+    assert not Abi.X86.is_compatible_with(Abi.ARM64)
+    assert not Abi.X86.is_compatible_with(Abi.ARM7)
+    assert not Abi.X86.is_compatible_with(Abi.ARM)
+    assert not Abi.ARM64.is_compatible_with(Abi.X86_64)
+    assert not Abi.ARM64.is_compatible_with(Abi.X86)
+
+
+def test_x86_64_does_not_run_bare_x86_in_reverse() -> None:
+    # Compatibility is directional: a plain x86 device cannot run x86_64 code.
+    assert not Abi.X86.is_compatible_with(Abi.X86_64)
 
 
 def test_unknown_is_compatible_with_nothing() -> None:

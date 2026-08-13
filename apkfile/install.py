@@ -10,22 +10,12 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from ._apk import ApkFile
+from ._resources import DensityBucket
 from .abi import Abi
 from .enums import SplitType
 from .exceptions import AdbError, AdbNotFoundError, InvalidApkError
 
 __all__ = ["install_apks"]
-
-# Standard Android screen-density buckets, keyed by the suffix used in split apk names
-# (e.g. a split named "config.xxhdpi").
-_DPI_BUCKETS = {
-    "ldpi": 120,
-    "mdpi": 160,
-    "hdpi": 240,
-    "xhdpi": 320,
-    "xxhdpi": 480,
-    "xxxhdpi": 640,
-}
 
 
 def _find_adb(adb_path: str | os.PathLike[str] | None) -> str:
@@ -258,15 +248,17 @@ def _resolve_apks_to_install(
         )
         best: tuple[int, ApkFile] | None = None
         for split in dpi_splits:
-            bucket = (
-                _DPI_BUCKETS.get(split.split_name.rsplit(".", 1)[-1])
-                if split.split_name
-                else None
+            bucket_name = (
+                split.split_name.rsplit(".", 1)[-1] if split.split_name else None
             )
-            if bucket is None:
+            try:
+                dpi = DensityBucket(bucket_name).dpi if bucket_name else None
+            except ValueError:
+                dpi = None
+            if dpi is None:
                 continue
-            if best is None or abs(bucket - device_dpi) < abs(best[0] - device_dpi):
-                best = (bucket, split)
+            if best is None or abs(dpi - device_dpi) < abs(best[0] - device_dpi):
+                best = (dpi, split)
         if best is not None:
             apks_to_install[_apk_path(best[1])] = best[1].size
 

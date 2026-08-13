@@ -8,10 +8,12 @@ import loguru
 
 from ._apk import ApkFile
 from ._bundle import ApkmFile, ApksFile, XapkFile
+from ._resources import DensityBucket, Icon, ScreenSize
 from ._security import (
     ComponentType,
     DeepLink,
     ExportedComponent,
+    ImpliedPermission,
     PermissionInfo,
     ProtectionLevel,
     SecurityInfo,
@@ -20,7 +22,7 @@ from ._signing import Certificate, SigningInfo, SigningScheme
 from ._size import DexInfo, SizeBreakdown
 from .abi import Abi
 from .diff import ApkDiff, diff
-from .enums import InstallLocation, SplitType
+from .enums import FormFactor, InstallLocation, SplitType
 from .exceptions import (
     AdbError,
     AdbNotFoundError,
@@ -46,13 +48,18 @@ __all__ = [
     "Certificate",
     "ComponentType",
     "DeepLink",
+    "DensityBucket",
     "DexInfo",
     "ExportedComponent",
+    "FormFactor",
+    "Icon",
+    "ImpliedPermission",
     "InstallLocation",
     "InvalidApkError",
     "InvalidBundleError",
     "PermissionInfo",
     "ProtectionLevel",
+    "ScreenSize",
     "SecurityInfo",
     "SigningInfo",
     "SigningScheme",

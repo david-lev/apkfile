@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
     from ._apk import ApkFile
     from .abi import Abi
 
 __all__ = ["ApkDiff", "diff"]
+
+_T = TypeVar("_T", bound=str)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,11 +62,11 @@ class ApkDiff:
     signing_changed: bool | None
 
 
-def _added(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
+def _added(a: Sequence[_T], b: Sequence[_T]) -> tuple[_T, ...]:
     return tuple(sorted(set(b) - set(a)))
 
 
-def _removed(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
+def _removed(a: Sequence[_T], b: Sequence[_T]) -> tuple[_T, ...]:
     return tuple(sorted(set(a) - set(b)))
 
 
@@ -109,10 +112,8 @@ def diff(a: ApkFile, b: ApkFile) -> ApkDiff:
         features_removed=_removed(a.features, b.features),
         libraries_added=_added(a.libraries, b.libraries),
         libraries_removed=_removed(a.libraries, b.libraries),
-        abis_added=tuple(sorted(set(b.abis) - set(a.abis), key=lambda abi: abi.value)),
-        abis_removed=tuple(
-            sorted(set(a.abis) - set(b.abis), key=lambda abi: abi.value)
-        ),
+        abis_added=_added(a.abis, b.abis),
+        abis_removed=_removed(a.abis, b.abis),
         langs_added=_added(a.langs, b.langs),
         langs_removed=_removed(a.langs, b.langs),
         signing_changed=signing_changed,

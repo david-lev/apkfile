@@ -15,6 +15,7 @@ __all__ = [
     "ComponentType",
     "DeepLink",
     "ExportedComponent",
+    "ImpliedPermission",
     "PermissionInfo",
     "ProtectionLevel",
     "SecurityInfo",
@@ -22,6 +23,9 @@ __all__ = [
 
 _ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _MIN_CLEARTEXT_DEFAULT_FALSE_SDK = 28
+# <provider> is the one component whose default `exported` value depends on targetSdkVersion
+# rather than intent-filter presence — see developer.android.com/guide/topics/manifest/provider-element.
+_MIN_PROVIDER_DEFAULT_UNEXPORTED_SDK = 17
 _VIEW_ACTION = "android.intent.action.VIEW"
 _COMPONENT_TAGS = ("activity", "activity-alias", "service", "receiver", "provider")
 
@@ -106,9 +110,18 @@ class ExportedComponent:
     Attributes:
         name: The component's fully-qualified class name.
         type: What kind of component this is.
-        exported: Whether the component is reachable from other apps — either explicitly declared via
-            ``android:exported``, or (pre-Android-12 default) implied by having an ``<intent-filter>``.
-        permission: The permission another app must hold to interact with this component, if any.
+        exported: Whether the component is reachable from other apps. For activities/services/
+            receivers, this is either an explicit ``android:exported``, or (when absent) implied by
+            having an ``<intent-filter>``. For providers, the default when absent instead depends on
+            ``targetSdkVersion`` (``True`` up to API 16, ``False`` from API 17 onward) — providers
+            rarely carry intent filters, so that signal doesn't apply to them.
+        permission: The permission another app must hold to interact with this component, if any
+            (``android:permission``).
+        read_permission: For providers, the permission required to query it (``android:readPermission``,
+            overrides :attr:`permission` for reads). ``None`` for non-provider components.
+        write_permission: For providers, the permission required to modify it
+            (``android:writePermission``, overrides :attr:`permission` for writes). ``None`` for
+            non-provider components.
         has_intent_filter: Whether the component declares at least one ``<intent-filter>``.
     """
 
@@ -116,7 +129,20 @@ class ExportedComponent:
     type: ComponentType
     exported: bool
     permission: str | None
+    read_permission: str | None
+    write_permission: str | None
     has_intent_filter: bool
+
+    @property
+    def is_permission_protected(self) -> bool:
+        """Whether *any* permission (``permission``/``read_permission``/``write_permission``) guards
+        this component. A provider with only ``read_permission`` set is still unprotected for writes —
+        inspect the individual fields for that distinction."""
+        return (
+            self.permission is not None
+            or self.read_permission is not None
+            or self.write_permission is not None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +170,23 @@ class DeepLink:
 
 
 @dataclass(frozen=True, slots=True)
+class ImpliedPermission:
+    """
+    A permission Android silently grants without the app requesting it, due to legacy platform
+    compatibility rules — an old ``target_sdk_version``, or requesting a related permission (e.g.
+    requesting ``WRITE_EXTERNAL_STORAGE`` implies ``READ_EXTERNAL_STORAGE``). See
+    `Manifest.permission <https://developer.android.com/reference/android/Manifest.permission>`_.
+
+    Attributes:
+        name: The implied permission's fully-qualified name.
+        max_sdk_version: The ``android:maxSdkVersion`` the implication is capped at, if any.
+    """
+
+    name: str
+    max_sdk_version: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class SecurityInfo:
     """
     An APK's security-relevant manifest posture.
@@ -165,6 +208,8 @@ class SecurityInfo:
         unprotected_exported_components: The subset of :attr:`exported_components` that are exported and
             require no permission to interact with — the most actionable manifest security finding.
         deep_links: Deep links resolved from activities' ``VIEW`` intent filters.
+        implied_permissions: Permissions Android silently grants without the app declaring them —
+            see :class:`ImpliedPermission`.
     """
 
     debuggable: bool
@@ -176,6 +221,7 @@ class SecurityInfo:
     exported_components: tuple[ExportedComponent, ...]
     unprotected_exported_components: tuple[ExportedComponent, ...]
     deep_links: tuple[DeepLink, ...]
+    implied_permissions: tuple[ImpliedPermission, ...]
 
     def effective_uses_cleartext_traffic(self, target_sdk_version: int | None) -> bool:
         """Resolve :attr:`uses_cleartext_traffic` to its effective value given ``target_sdk_version``."""
@@ -235,10 +281,11 @@ def _build_permissions(apk: _AndroguardAPK) -> tuple[PermissionInfo, ...]:
 
 
 def _build_exported_components(
-    manifest_root: _XmlElement, package: str
+    manifest_root: _XmlElement, package: str, effective_target_sdk_version: int
 ) -> tuple[ExportedComponent, ...]:
     components: list[ExportedComponent] = []
     for tag in _COMPONENT_TAGS:
+        is_provider = tag == "provider"
         component_type = (
             ComponentType.ACTIVITY if tag.startswith("activity") else ComponentType(tag)
         )
@@ -248,17 +295,32 @@ def _build_exported_components(
                 continue
             has_intent_filter = element.find("intent-filter") is not None
             explicit_exported = _bool_attr(element, "exported")
-            exported = (
-                explicit_exported
-                if explicit_exported is not None
-                else has_intent_filter
-            )
+            if explicit_exported is not None:
+                exported = explicit_exported
+            elif is_provider:
+                # <provider> ignores intent-filter presence for its default; it depends on
+                # targetSdkVersion instead (see _MIN_PROVIDER_DEFAULT_UNEXPORTED_SDK above).
+                exported = (
+                    effective_target_sdk_version < _MIN_PROVIDER_DEFAULT_UNEXPORTED_SDK
+                )
+            else:
+                exported = has_intent_filter
             components.append(
                 ExportedComponent(
                     name=_qualify(raw_name, package),
                     type=component_type,
                     exported=exported,
                     permission=element.get(_ANDROID_NS + "permission"),
+                    read_permission=(
+                        element.get(_ANDROID_NS + "readPermission")
+                        if is_provider
+                        else None
+                    ),
+                    write_permission=(
+                        element.get(_ANDROID_NS + "writePermission")
+                        if is_provider
+                        else None
+                    ),
                     has_intent_filter=has_intent_filter,
                 )
             )
@@ -296,6 +358,15 @@ def _build_deep_links(
     return tuple(deep_links)
 
 
+def _build_implied_permissions(apk: _AndroguardAPK) -> tuple[ImpliedPermission, ...]:
+    return tuple(
+        ImpliedPermission(
+            name=name, max_sdk_version=int(max_sdk) if max_sdk is not None else None
+        )
+        for name, max_sdk in apk.get_uses_implied_permission_list()
+    )
+
+
 def build_security_info(
     apk: _AndroguardAPK, manifest_root: _XmlElement
 ) -> SecurityInfo:
@@ -322,7 +393,9 @@ def build_security_info(
     )
 
     permissions = _build_permissions(apk)
-    exported_components = _build_exported_components(manifest_root, package)
+    exported_components = _build_exported_components(
+        manifest_root, package, apk.get_effective_target_sdk_version()
+    )
 
     return SecurityInfo(
         debuggable=debuggable,
@@ -333,7 +406,10 @@ def build_security_info(
         dangerous_permissions=tuple(p.name for p in permissions if p.is_dangerous),
         exported_components=exported_components,
         unprotected_exported_components=tuple(
-            c for c in exported_components if c.exported and c.permission is None
+            c
+            for c in exported_components
+            if c.exported and not c.is_permission_protected
         ),
         deep_links=_build_deep_links(apk, manifest_root, package),
+        implied_permissions=_build_implied_permissions(apk),
     )

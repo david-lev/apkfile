@@ -9,7 +9,28 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .abi import Abi
 
-__all__ = ["InstallLocation", "SplitType"]
+__all__ = ["FormFactor", "InstallLocation", "SplitType"]
+
+
+class FormFactor(str, Enum):
+    """
+    A device form factor an app appears to specifically target, inferred from manifest heuristics
+    androguard applies (``<uses-feature>``/``<uses-feature required="false">`` declarations). These
+    are heuristics, not authoritative — not every app sets the underlying features, even ones that
+    do target the form factor.
+
+    Attributes:
+        TV: The app doesn't require a touchscreen (the rule Google Play uses for its TV section —
+            see `is_androidtv <https://developer.android.com/training/tv/start/start.html>`_), or it
+            declares the ``android.software.leanback`` feature (the TV/Leanback UI framework).
+        WEARABLE: The app declares the ``android.hardware.type.watch`` feature.
+    """
+
+    TV = "tv"
+    WEARABLE = "wearable"
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}.{self.name}"
 
 
 class InstallLocation(str, Enum):
@@ -30,7 +51,9 @@ class InstallLocation(str, Enum):
 
     @classmethod
     def _missing_(cls, value: object) -> InstallLocation:
-        return cls.AUTO
+        # "internalOnly" is the documented default when `android:installLocation` is absent —
+        # NOT "auto" — see developer.android.com/guide/topics/manifest/manifest-element#install.
+        return cls.INTERNAL_ONLY
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}.{self.name}"
@@ -70,7 +93,7 @@ def classify_split(
     tail = split_name.rsplit(".", 1)[-1]
     if tail.endswith("dpi"):
         return SplitType.DPI
-    if any(tail in lang for lang in langs):
+    if tail in langs:
         return SplitType.LANGUAGE
     if len(abis) == 1:
         return SplitType.ABI

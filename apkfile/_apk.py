@@ -17,11 +17,12 @@ from typing import TYPE_CHECKING, Any
 
 from androguard.core.apk import APK as _AndroguardAPK
 
+from ._resources import DensityBucket, Icon, ScreenSize
 from ._security import SecurityInfo, build_security_info
 from ._signing import SigningInfo, build_signing_info
 from ._size import DexInfo, SizeBreakdown, build_dex_info, build_size_breakdown
 from .abi import Abi
-from .enums import InstallLocation, SplitType, classify_split
+from .enums import FormFactor, InstallLocation, SplitType, classify_split
 from .exceptions import ApkFileError, InvalidApkError
 
 if TYPE_CHECKING:
@@ -52,8 +53,23 @@ _PARSE_ERRORS = (
 
 def _jsonable(value: Any) -> Any:
     """Recursively convert dataclass instances (e.g. :class:`SigningInfo`) into plain dicts/lists,
-    so :meth:`ApkFile.as_dict` output round-trips cleanly through ``json.dumps``."""
-    return dataclasses.asdict(value) if dataclasses.is_dataclass(value) else value
+    so :meth:`ApkFile.as_dict` output round-trips cleanly through ``json.dumps``.
+
+    Doesn't just delegate to `dataclasses.asdict` because some dataclasses (e.g. :class:`Icon`)
+    carry a private back-reference field (leading underscore) to the `ApkFile` they came from —
+    `asdict` would try to deep-copy that too, which is neither cheap nor meaningful for JSON output.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            f.name: _jsonable(getattr(value, f.name))
+            for f in dataclasses.fields(value)
+            if not f.name.startswith("_")
+        }
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value
 
 
 def _load_apk(source: Path | bytes, *, raw: bool, display_name: str) -> _AndroguardAPK:
@@ -95,6 +111,8 @@ class ApkFile:
         version_name: A string value that represents the release version of the application code.
         min_sdk_version: The minimum version of the Android platform on which the app will run.
         target_sdk_version: The API level on which the app is designed to run.
+        max_sdk_version: The maximum API level on which the app is allowed to run, if capped
+            (``android:maxSdkVersion`` — a discouraged, rarely-used attribute).
         install_location: Where the application can be installed: external storage, internal only, or auto.
         labels: A mapping of locale (``""`` for the default locale) to the app's user-visible label in
             that locale.
@@ -102,12 +120,15 @@ class ApkFile:
         libraries: Shared libraries the app must be linked against.
         features: Hardware/software features the app uses.
         launchable_activity: The app's main/launcher activity, if any.
-        supported_screens: Screen sizes the app declares support for (``small``/``normal``/``large``/``xlarge``).
+        supported_screens: Screen sizes the app declares support for.
         supports_any_density: Whether the app includes resources to accommodate any screen density.
         langs: Locales the app has resources for.
         densities: Screen density buckets (dpi) the app ships an icon asset for.
         abis: Native ABIs the app ships native libraries for (from ``lib/<abi>/...``).
-        icons: Mapping of density (dpi) to the in-archive path of the icon asset for that density.
+        icons: Every app-icon resource declared, one per density/adaptive-icon variant. See
+            :meth:`best_icon` to pick a single one.
+        form_factors: Device form factors (TV/wearable) the app appears to specifically target,
+            per Android's own manifest heuristics — see :class:`~apkfile.FormFactor`.
         split_name: The ``split`` name of this APK, if it is a split APK.
         is_split: Whether this is a split APK.
         split_type: What the split varies by (language/dpi/abi/other), if :attr:`is_split`.
@@ -177,6 +198,20 @@ class ApkFile:
         return int(value) if value is not None else None
 
     @cached_property
+    def max_sdk_version(self) -> int | None:
+        value = self._apk.get_max_sdk_version()
+        return int(value) if value else None
+
+    @cached_property
+    def form_factors(self) -> tuple[FormFactor, ...]:
+        factors: list[FormFactor] = []
+        if self._apk.is_androidtv() or self._apk.is_leanback():
+            factors.append(FormFactor.TV)
+        if self._apk.is_wearable():
+            factors.append(FormFactor.WEARABLE)
+        return tuple(factors)
+
+    @cached_property
     def install_location(self) -> InstallLocation:
         return InstallLocation(self._manifest_root.get(_ANDROID_NS + "installLocation"))
 
@@ -231,35 +266,67 @@ class ApkFile:
         )
 
     @cached_property
-    def icons(self) -> dict[int, str]:
+    def icons(self) -> tuple[Icon, ...]:
         application = self._manifest_root.find("application")
         icon_ref = (
             application.get(_ANDROID_NS + "icon") if application is not None else None
         )
         if not icon_ref or not icon_ref.startswith("@"):
-            return {}
+            return ()
         try:
             resource_id = int(icon_ref[1:], 16)
         except ValueError:
-            return {}
+            return ()
         arsc = self._apk.get_android_resources()
         if arsc is None:
-            return {}
-        icons: dict[int, str] = {}
-        # androguard's type hints declare `list[ARSCResTableConfig]`, but this actually returns
-        # `list[tuple[ARSCResTableConfig, ARSCResStringPoolEntry]]` at runtime.
-        for config, _entry in arsc.get_res_configs(resource_id):  # ty: ignore[not-iterable]
-            density = config.get_density()
-            if not density:
-                continue
-            path = self._apk.get_app_icon(max_dpi=density)
-            if path:
-                icons[density] = path
-        return dict(sorted(icons.items()))
+            return ()
+        # `get_resolved_res_configs` (rather than `get_res_configs` + a per-density
+        # `get_app_icon(max_dpi=...)` re-lookup) is what androguard's own `get_app_icon` uses
+        # internally, and is the only way to see every variant including density-independent ones
+        # (`anydpi` adaptive icons, `nodpi` fallbacks) that a fixed numeric-density loop would miss.
+        icons: list[Icon] = []
+        for config, path in arsc.get_resolved_res_configs(resource_id):
+            # androguard's type hint declares `get_density() -> str`, but it actually returns an
+            # `int` (confirmed hands-on); `int(...)` is a no-op then, and also makes this safe
+            # regardless.
+            density = int(config.get_density())
+            icons.append(
+                Icon(
+                    density=density,
+                    bucket=DensityBucket.from_dpi(density),
+                    path=path,
+                    _apk=self,
+                )
+            )
+        return tuple(sorted(icons, key=lambda icon: icon.density))
+
+    def best_icon(self, max_dpi: int | None = None) -> Icon | None:
+        """
+        Pick the single best icon for a given max density, mirroring androguard's own
+        ``APK.get_app_icon`` ranking: the highest-density icon at or below ``max_dpi``.
+
+        Note this means an unbounded (default) call can return a ``nodpi`` icon (density
+        ``65535``) in preference to an ``anydpi`` adaptive icon (density ``65534``) if both are
+        present, since ``nodpi``'s raw density value is (perhaps surprisingly) the higher of the
+        two — this matches androguard's actual ranking behavior, not just its docstring's stated
+        intent. Pass an explicit ``max_dpi`` (e.g. the device's real density) to avoid that.
+
+        Args:
+            max_dpi: Only consider icons at or below this density. ``None`` (the default) means
+                unbounded.
+        """
+        candidates = (
+            self.icons
+            if max_dpi is None
+            else tuple(i for i in self.icons if i.density <= max_dpi)
+        )
+        if not candidates:
+            return None
+        return max(candidates, key=lambda icon: icon.density)
 
     @cached_property
     def densities(self) -> tuple[int, ...]:
-        return tuple(self.icons.keys())
+        return tuple(sorted({icon.density for icon in self.icons}))
 
     @cached_property
     def abis(self) -> tuple[Abi, ...]:
@@ -277,12 +344,12 @@ class ApkFile:
         return self._manifest_root.find("supports-screens")
 
     @cached_property
-    def supported_screens(self) -> tuple[str, ...]:
+    def supported_screens(self) -> tuple[ScreenSize, ...]:
         element = self._supports_screens_element
         if element is None:
             return ()
         return tuple(
-            attr[: -len("Screens")].lower()
+            ScreenSize(attr[: -len("Screens")].lower())
             for attr in _SCREEN_SIZE_ATTRS
             if element.get(_ANDROID_NS + attr) == "true"
         )
@@ -492,6 +559,7 @@ class ApkFile:
         "version_name",
         "min_sdk_version",
         "target_sdk_version",
+        "max_sdk_version",
         "install_location",
         "labels",
         "permissions",
@@ -504,6 +572,7 @@ class ApkFile:
         "densities",
         "abis",
         "icons",
+        "form_factors",
         "split_name",
         "is_split",
         "split_type",

@@ -37,3 +37,11 @@ def test_classify_other_split() -> None:
 
 def test_classify_uses_last_dot_segment_only() -> None:
     assert classify_split("com.example.config.hdpi", langs=(), abis=()) is SplitType.DPI
+
+
+def test_classify_language_requires_exact_match_not_substring() -> None:
+    # A previous version used a substring check (`tail in lang`), so a split named "config.b"
+    # would wrongly classify as LANGUAGE just because "b" is a substring of "be" -- it should
+    # require an exact match against one of `langs` instead.
+    assert classify_split("config.b", langs=("be", "bn"), abis=()) is SplitType.OTHER
+    assert classify_split("config.b", langs=("b",), abis=()) is SplitType.LANGUAGE
