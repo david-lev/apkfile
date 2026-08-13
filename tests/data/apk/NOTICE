@@ -1,0 +1,8 @@
+The APK files in this directory are test fixtures taken as-is from the androguard project's own test
+suite, used here (unmodified) purely as sample APKs for apkfile's test suite:
+
+  - test-debug.apk   <- tests/data/APK/Test-debug.apk
+  - politedroid.apk  <- tests/data/APK/com.politedroid_4.apk
+
+Source: https://github.com/androguard/androguard (tests/data/APK/), licensed Apache-2.0.
+https://github.com/androguard/androguard/blob/master/LICENSE

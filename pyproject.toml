@@ -1,0 +1,99 @@
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "apkfile"
+module-root = ""
+
+[project]
+name = "apkfile"
+version = "1.0.0"
+description = "Python library for handling APK, APKM, XAPK, and APKS files"
+readme = "README.md"
+license = "MIT"
+license-files = [
+    "LICENSE",
+]
+requires-python = ">=3.10"
+authors = [
+    { name = "David Lev", email = "david@davidlev.dev" },
+]
+keywords = [
+    "apk",
+    "apkm",
+    "xapk",
+    "apks",
+    "android",
+    "androguard",
+    "adb",
+    "apkfile",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "androguard>=4.1,<5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest~=9.0",
+    "pytest-cov~=7.0",
+    "pytest-mock~=3.15",
+    "ruff~=0.16",
+    "ty>=0.0.65",
+    "pre-commit~=4.5",
+]
+
+[project.scripts]
+apkfile = "apkfile.__main__:main"
+
+[project.urls]
+"Documentation" = "https://github.com/david-lev/apkfile#readme"
+"Issue Tracker" = "https://github.com/david-lev/apkfile/issues"
+"Source Code" = "https://github.com/david-lev/apkfile"
+"Changelog" = "https://github.com/david-lev/apkfile/blob/master/CHANGELOG.md"
+"Funding" = "https://github.com/sponsors/david-lev"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+extend-select = [
+    "T20", # flake8-print: forbid stray `print()`/`pprint()` calls in library code (use `logging` instead)
+    "E711", # forbid `== None` / `!= None`; use `is None` / `is not None` instead
+    "E712", # forbid `== True` / `== False`; use `is`/`is not` or plain truthiness instead
+    "E741", # forbid ambiguous single-character names (`l`, `O`, `I`)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"apkfile/__main__.py" = ["T201"]
+"tests/**" = ["T201"]
+
+[tool.ty.src]
+include = ["apkfile"]
+
+[tool.coverage.run]
+include = ["apkfile/*"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "def __repr__",
+    "\\.\\.\\.",
+]

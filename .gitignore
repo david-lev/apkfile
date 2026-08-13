@@ -1,6 +1,25 @@
-__pycache__
+__pycache__/
+*.pyc
 .idea
-dist
-apkfile.egg-info
-build
-*apk
+.vscode
+
+# build artifacts
+build/
+dist/
+*.egg-info/
+
+# scratch apk files dropped at the repo root for manual testing
+/*.apk
+/*.apkm
+/*.xapk
+/*.apks
+
+# tooling
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
