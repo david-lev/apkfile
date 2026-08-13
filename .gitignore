@@ -7,6 +7,7 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+site/
 
 # scratch apk files dropped at the repo root for manual testing
 /*.apk

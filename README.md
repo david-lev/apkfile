@@ -14,6 +14,7 @@
   <a href="https://github.com/david-lev/apkfile/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/david-lev/apkfile/tests.yml?label=tests" alt="Tests"/></a>
   <a href="https://results.pre-commit.ci/latest/github/david-lev/apkfile/main"><img src="https://results.pre-commit.ci/badge/github/david-lev/apkfile/main.svg" alt="pre-commit.ci status"/></a>
   <a href="https://codecov.io/gh/david-lev/apkfile"><img src="https://codecov.io/gh/david-lev/apkfile/graph/badge.svg" alt="Coverage"/></a>
+  <a href="https://apkfile.readthedocs.io"><img src="https://readthedocs.org/projects/apkfile/badge/?version=latest&" alt="Docs"/></a>
   <a href="https://github.com/david-lev/apkfile/blob/main/LICENSE"><img src="https://img.shields.io/github/license/david-lev/apkfile?color=%2334D058" alt="License"/></a>
   <a href="https://www.codefactor.io/repository/github/david-lev/apkfile/overview/main"><img src="https://www.codefactor.io/repository/github/david-lev/apkfile/badge/main" alt="Code Quality"/></a>
 </p>
@@ -22,6 +23,8 @@ apkfile reads metadata out of Android `.apk`, `.apkm`, `.xapk`, and `.apks` file
 permissions, supported ABIs/languages/densities, icons, signing certificates, manifest security posture
 (exported components, deep links, dangerous permissions), size/DEX composition, and more — and can install
 them to a connected device over `adb`, or diff two apks against each other.
+
+Full documentation: **[apkfile.readthedocs.io](https://apkfile.readthedocs.io)**
 
 ### Install
 

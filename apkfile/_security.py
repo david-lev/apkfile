@@ -32,13 +32,13 @@ _COMPONENT_TAGS = ("activity", "activity-alias", "service", "receiver", "provide
 
 class ProtectionLevel(str, Enum):
     """
-    A permission's `protection level <https://developer.android.com/guide/topics/manifest/permission-element#plevel>`_.
+    A permission's [protection level](https://developer.android.com/guide/topics/manifest/permission-element#plevel).
 
     Attributes:
         NORMAL: Low-risk; granted automatically.
         DANGEROUS: Grants the requesting app access to private user data; requires user approval.
         SIGNATURE: Granted only to apps signed with the same certificate as the app that declared it.
-        SIGNATURE_OR_SYSTEM: Like ``SIGNATURE``, but also granted to apps in the Android system image.
+        SIGNATURE_OR_SYSTEM: Like `SIGNATURE`, but also granted to apps in the Android system image.
         UNKNOWN: A protection level apkfile doesn't recognize (e.g. a compound OEM-specific value).
     """
 
@@ -58,13 +58,13 @@ class ProtectionLevel(str, Enum):
 
 class ComponentType(str, Enum):
     """
-    The kind of manifest component an :class:`ExportedComponent` is.
+    The kind of manifest component an [`ExportedComponent`][apkfile.ExportedComponent] is.
 
     Attributes:
-        ACTIVITY: An ``<activity>`` or ``<activity-alias>``.
-        SERVICE: A ``<service>``.
-        RECEIVER: A ``<receiver>``.
-        PROVIDER: A ``<provider>``.
+        ACTIVITY: An `<activity>` or `<activity-alias>`.
+        SERVICE: A `<service>`.
+        RECEIVER: A `<receiver>`.
+        PROVIDER: A `<provider>`.
     """
 
     ACTIVITY = "activity"
@@ -82,8 +82,8 @@ class PermissionInfo:
     A permission requested by the app, with AOSP-known details if available.
 
     Attributes:
-        name: The fully-qualified permission name (e.g. ``"android.permission.READ_CALENDAR"``).
-        protection_level: The permission's protection level, if apkfile recognizes it (``None`` for
+        name: The fully-qualified permission name (e.g. `"android.permission.READ_CALENDAR"`).
+        protection_level: The permission's protection level, if apkfile recognizes it (`None` for
             custom/third-party permissions AOSP doesn't document).
         group: The permission group it belongs to, if known.
         label: A short human-readable label, if known.
@@ -98,7 +98,7 @@ class PermissionInfo:
 
     @property
     def is_dangerous(self) -> bool:
-        """Whether this permission's protection level is :attr:`ProtectionLevel.DANGEROUS`."""
+        """Whether this permission's protection level is `ProtectionLevel.DANGEROUS`."""
         return self.protection_level is ProtectionLevel.DANGEROUS
 
 
@@ -111,18 +111,18 @@ class ExportedComponent:
         name: The component's fully-qualified class name.
         type: What kind of component this is.
         exported: Whether the component is reachable from other apps. For activities/services/
-            receivers, this is either an explicit ``android:exported``, or (when absent) implied by
-            having an ``<intent-filter>``. For providers, the default when absent instead depends on
-            ``targetSdkVersion`` (``True`` up to API 16, ``False`` from API 17 onward) — providers
+            receivers, this is either an explicit `android:exported`, or (when absent) implied by
+            having an `<intent-filter>`. For providers, the default when absent instead depends on
+            `targetSdkVersion` (`True` up to API 16, `False` from API 17 onward) — providers
             rarely carry intent filters, so that signal doesn't apply to them.
         permission: The permission another app must hold to interact with this component, if any
-            (``android:permission``).
-        read_permission: For providers, the permission required to query it (``android:readPermission``,
-            overrides :attr:`permission` for reads). ``None`` for non-provider components.
+            (`android:permission`).
+        read_permission: For providers, the permission required to query it (`android:readPermission`,
+            overrides `permission` for reads). `None` for non-provider components.
         write_permission: For providers, the permission required to modify it
-            (``android:writePermission``, overrides :attr:`permission` for writes). ``None`` for
+            (`android:writePermission`, overrides `permission` for writes). `None` for
             non-provider components.
-        has_intent_filter: Whether the component declares at least one ``<intent-filter>``.
+        has_intent_filter: Whether the component declares at least one `<intent-filter>`.
     """
 
     name: str
@@ -135,8 +135,8 @@ class ExportedComponent:
 
     @property
     def is_permission_protected(self) -> bool:
-        """Whether *any* permission (``permission``/``read_permission``/``write_permission``) guards
-        this component. A provider with only ``read_permission`` set is still unprotected for writes —
+        """Whether *any* permission (`permission`/`read_permission`/`write_permission`) guards
+        this component. A provider with only `read_permission` set is still unprotected for writes —
         inspect the individual fields for that distinction."""
         return (
             self.permission is not None
@@ -148,11 +148,11 @@ class ExportedComponent:
 @dataclass(frozen=True, slots=True)
 class DeepLink:
     """
-    A deep link into an activity, resolved from an ``<intent-filter>``'s ``VIEW`` action + ``<data>``.
+    A deep link into an activity, resolved from an `<intent-filter>`'s `VIEW` action + `<data>`.
 
     Attributes:
         activity: The fully-qualified name of the activity this deep link opens.
-        scheme: The URI scheme (e.g. ``"https"``), if declared.
+        scheme: The URI scheme (e.g. `"https"`), if declared.
         host: The URI host, if declared.
         path: The exact URI path, if declared.
         path_prefix: The URI path prefix, if declared.
@@ -173,13 +173,13 @@ class DeepLink:
 class ImpliedPermission:
     """
     A permission Android silently grants without the app requesting it, due to legacy platform
-    compatibility rules — an old ``target_sdk_version``, or requesting a related permission (e.g.
-    requesting ``WRITE_EXTERNAL_STORAGE`` implies ``READ_EXTERNAL_STORAGE``). See
-    `Manifest.permission <https://developer.android.com/reference/android/Manifest.permission>`_.
+    compatibility rules — an old `target_sdk_version`, or requesting a related permission (e.g.
+    requesting `WRITE_EXTERNAL_STORAGE` implies `READ_EXTERNAL_STORAGE`). See
+    [Manifest.permission](https://developer.android.com/reference/android/Manifest.permission).
 
     Attributes:
         name: The implied permission's fully-qualified name.
-        max_sdk_version: The ``android:maxSdkVersion`` the implication is capped at, if any.
+        max_sdk_version: The `android:maxSdkVersion` the implication is capped at, if any.
     """
 
     name: str
@@ -192,24 +192,23 @@ class SecurityInfo:
     An APK's security-relevant manifest posture.
 
     Attributes:
-        debuggable: Whether ``android:debuggable`` is set on ``<application>``.
-        allow_backup: Whether the app allows its data to be backed up (defaults to ``True`` when unset,
+        debuggable: Whether `android:debuggable` is set on `<application>`.
+        allow_backup: Whether the app allows its data to be backed up (defaults to `True` when unset,
             matching the Android platform default).
-        uses_cleartext_traffic: Whether the app permits plaintext (non-TLS) network traffic. ``None`` means
-            the manifest doesn't declare it explicitly; the effective platform default is ``False`` from
-            ``target_sdk_version`` 28 onward, and ``True`` before that.
-        has_network_security_config: Whether the app ships a `Network Security Config
-            <https://developer.android.com/privacy-and-security/security-config>`_
-            (``android:networkSecurityConfig``), which can further restrict cleartext traffic per-domain.
+        uses_cleartext_traffic: Whether the app permits plaintext (non-TLS) network traffic. `None` means
+            the manifest doesn't declare it explicitly; the effective platform default is `False` from
+            `target_sdk_version` 28 onward, and `True` before that.
+        has_network_security_config: Whether the app ships a [Network Security Config](https://developer.android.com/privacy-and-security/security-config)
+            (`android:networkSecurityConfig`), which can further restrict cleartext traffic per-domain.
         permissions: Every requested permission, with AOSP details where available.
-        dangerous_permissions: The subset of :attr:`permissions` classified as
-            :attr:`ProtectionLevel.DANGEROUS` (names only).
+        dangerous_permissions: The subset of `permissions` classified as
+            `ProtectionLevel.DANGEROUS` (names only).
         exported_components: Every activity/service/receiver/provider and its exported status.
-        unprotected_exported_components: The subset of :attr:`exported_components` that are exported and
+        unprotected_exported_components: The subset of `exported_components` that are exported and
             require no permission to interact with — the most actionable manifest security finding.
-        deep_links: Deep links resolved from activities' ``VIEW`` intent filters.
+        deep_links: Deep links resolved from activities' `VIEW` intent filters.
         implied_permissions: Permissions Android silently grants without the app declaring them —
-            see :class:`ImpliedPermission`.
+            see [`ImpliedPermission`][apkfile.ImpliedPermission].
     """
 
     debuggable: bool
@@ -224,7 +223,7 @@ class SecurityInfo:
     implied_permissions: tuple[ImpliedPermission, ...]
 
     def effective_uses_cleartext_traffic(self, target_sdk_version: int | None) -> bool:
-        """Resolve :attr:`uses_cleartext_traffic` to its effective value given ``target_sdk_version``."""
+        """Resolve `uses_cleartext_traffic` to its effective value given `target_sdk_version`."""
         if self.uses_cleartext_traffic is not None:
             return self.uses_cleartext_traffic
         return (
@@ -370,7 +369,7 @@ def _build_implied_permissions(apk: _AndroguardAPK) -> tuple[ImpliedPermission, 
 def build_security_info(
     apk: _AndroguardAPK, manifest_root: _XmlElement
 ) -> SecurityInfo:
-    """Build a :class:`SecurityInfo` from an androguard ``APK`` and its parsed manifest root."""
+    """Build a [`SecurityInfo`][apkfile.SecurityInfo] from an androguard `APK` and its parsed manifest root."""
     package = apk.get_package()
     application = manifest_root.find("application")
 

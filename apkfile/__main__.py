@@ -1,4 +1,4 @@
-"""The ``apkfile`` command-line interface."""
+"""The `apkfile` command-line interface."""
 
 from __future__ import annotations
 

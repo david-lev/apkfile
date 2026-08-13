@@ -49,6 +49,10 @@ uv run ruff check .                 # lint
 uv run ruff format .                # format
 uv run ty check                     # type check
 uv run pre-commit run --all-files   # everything pre-commit enforces
+
+uv sync --group docs                          # install docs dependencies
+uv run mkdocs serve -f docs/mkdocs.yml        # live-reloading docs site at localhost:8000
+uv run mkdocs build -f docs/mkdocs.yml --strict  # build the docs site, failing on broken cross-references
 ```
 
 ## Submitting changes

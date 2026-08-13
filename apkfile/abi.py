@@ -11,7 +11,7 @@ class Abi(str, Enum):
     """
     Android supported ABIs.
 
-    See the `Android documentation <https://developer.android.com/ndk/guides/abis>`_.
+    See the [Android documentation](https://developer.android.com/ndk/guides/abis).
 
     Attributes:
         ARM: armeabi
@@ -34,14 +34,14 @@ class Abi(str, Enum):
         return cls.UNKNOWN
 
     def is_compatible_with(self, other: Abi) -> bool:
-        """Whether a device with this ABI can run an APK built for ``other``."""
+        """Whether a device with this ABI can run an APK built for `other`."""
         if self == other:
             return True
         return other in _COMPATIBILITY_MAP[self]
 
     @classmethod
     def all(cls) -> tuple[Abi, ...]:
-        """All the supported (i.e. non-``UNKNOWN``) ABIs."""
+        """All the supported (i.e. non-`UNKNOWN`) ABIs."""
         return tuple(abi for abi in cls if abi is not cls.UNKNOWN)
 
     def __repr__(self) -> str:

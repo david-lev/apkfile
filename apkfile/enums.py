@@ -15,15 +15,15 @@ __all__ = ["FormFactor", "InstallLocation", "SplitType"]
 class FormFactor(str, Enum):
     """
     A device form factor an app appears to specifically target, inferred from manifest heuristics
-    androguard applies (``<uses-feature>``/``<uses-feature required="false">`` declarations). These
+    androguard applies (`<uses-feature>`/`<uses-feature required="false">` declarations). These
     are heuristics, not authoritative — not every app sets the underlying features, even ones that
     do target the form factor.
 
     Attributes:
         TV: The app doesn't require a touchscreen (the rule Google Play uses for its TV section —
-            see `is_androidtv <https://developer.android.com/training/tv/start/start.html>`_), or it
-            declares the ``android.software.leanback`` feature (the TV/Leanback UI framework).
-        WEARABLE: The app declares the ``android.hardware.type.watch`` feature.
+            see [is_androidtv](https://developer.android.com/training/tv/start/start.html)), or it
+            declares the `android.software.leanback` feature (the TV/Leanback UI framework).
+        WEARABLE: The app declares the `android.hardware.type.watch` feature.
     """
 
     TV = "tv"
@@ -37,7 +37,7 @@ class InstallLocation(str, Enum):
     """
     Where the application can be installed: on external storage, internal only, or auto.
 
-    See the `Android documentation <https://developer.android.com/reference/android/content/pm/PackageInfo.html#installLocation>`_.
+    See the [Android documentation](https://developer.android.com/reference/android/content/pm/PackageInfo.html#installLocation).
 
     Attributes:
         AUTO: Let the system decide where to install the app.
@@ -83,10 +83,10 @@ def classify_split(
     split_name: str, langs: Sequence[str], abis: Sequence[Abi]
 ) -> SplitType:
     """
-    Classify a split APK's split name into a :class:`SplitType`, given the langs/abis it was resolved with.
+    Classify a split APK's split name into a [`SplitType`][apkfile.SplitType], given the langs/abis it was resolved with.
 
     Args:
-        split_name: The raw ``split`` attribute of the split APK's manifest (e.g. ``"config.en"``).
+        split_name: The raw `split` attribute of the split APK's manifest (e.g. `"config.en"`).
         langs: The langs supported by the split (usually just the split itself, for a language split).
         abis: The ABIs supported by the split (usually just one, for an ABI split).
     """

@@ -1,4 +1,4 @@
-"""Installing apks on a device via ``adb``."""
+"""Installing apks on a device via `adb`."""
 
 from __future__ import annotations
 
@@ -54,10 +54,10 @@ def install_apks(
     adb_path: str | os.PathLike[str] | None = None,
 ) -> None:
     """
-    Install apk(s) on android device(s) using `adb <https://developer.android.com/studio/command-line/adb>`_.
+    Install apk(s) on android device(s) using [adb](https://developer.android.com/studio/command-line/adb).
 
-    ``check`` is ``True`` by default, meaning the app(s) are checked for compatibility with the device(s)
-    before installing — comparing ``min_sdk_version``, ``abis``, and locale/density splits against the
+    `check` is `True` by default, meaning the app(s) are checked for compatibility with the device(s)
+    before installing — comparing `min_sdk_version`, `abis`, and locale/density splits against the
     device's capabilities.
 
     >>> install_apks("path/to/apk.apk")
@@ -76,17 +76,17 @@ def install_apks(
     Args:
         apks: The path to an apk, or an iterable of paths (a base apk + its splits).
         check: Check that the app(s) are compatible with the device(s) before installing.
-        upgrade: Whether to upgrade the app if it's already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
+        upgrade: Whether to upgrade the app if it's already installed (`INSTALL_FAILED_ALREADY_EXISTS`).
         device_id: The id of the device to install on (if not given, all connected devices are used).
-        skip_broken: Skip apks that fail to parse instead of raising (only relevant when ``check=True``).
-        installer: The package name of the app performing the installation (e.g. ``com.android.vending``).
+        skip_broken: Skip apks that fail to parse instead of raising (only relevant when `check=True`).
+        installer: The package name of the app performing the installation (e.g. `com.android.vending`).
         originating_uri: The URI of the app performing the installation.
-        adb_path: Path to the ``adb`` executable (if not in ``PATH``).
+        adb_path: Path to the `adb` executable (if not in `PATH`).
 
     Raises:
-        AdbNotFoundError: If ``adb`` is not installed.
-        AdbError: If an ``adb`` command failed.
-        InvalidApkError: If ``check`` is ``True``, ``skip_broken`` is ``False``, and one of the apks is invalid.
+        AdbNotFoundError: If `adb` is not installed.
+        AdbError: If an `adb` command failed.
+        InvalidApkError: If `check` is `True`, `skip_broken` is `False`, and one of the apks is invalid.
     """
     adb = _find_adb(adb_path)
     apk_paths = (
@@ -170,7 +170,7 @@ def install_apks(
 def _resolve_apks_to_install(
     *, apk_paths: list[str], adb_args: tuple[str, ...], skip_broken: bool
 ) -> dict[str, int]:
-    """Parse ``apk_paths`` and pick the subset compatible with the device targeted by ``adb_args``."""
+    """Parse `apk_paths` and pick the subset compatible with the device targeted by `adb_args`."""
     all_apks: list[ApkFile] = []
     for apk_path in apk_paths:
         try:

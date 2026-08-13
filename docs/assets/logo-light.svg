@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="apkfile logo">
+  <title>apkfile</title>
+  <rect x="40" y="100" width="140" height="100" rx="20" fill="#241E18"/>
+  <rect x="64" y="68" width="140" height="100" rx="20" fill="#B0793A"/>
+  <rect x="88" y="36" width="140" height="100" rx="20" fill="#E0A94A"/>
+  <path d="M198,36 L228,36 L228,66 Z" fill="#4F9A6B"/>
+</svg>

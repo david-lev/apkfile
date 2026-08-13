@@ -1,4 +1,4 @@
-"""Comparing two ``ApkFile``\\ s."""
+"""Comparing two `ApkFile`s."""
 
 from __future__ import annotations
 
@@ -18,27 +18,27 @@ _T = TypeVar("_T", bound=str)
 @dataclass(frozen=True, slots=True)
 class ApkDiff:
     """
-    The differences between two :class:`~apkfile.ApkFile`\\ s (``a`` compared against ``b``).
+    The differences between two [`ApkFile`][apkfile.ApkFile]s (`a` compared against `b`).
 
     Attributes:
-        package_name_changed: Whether ``a`` and ``b`` have different package names.
-        version_code_delta: ``b.version_code - a.version_code``.
-        version_name_from: ``a``'s version name.
-        version_name_to: ``b``'s version name.
-        min_sdk_delta: ``b.min_sdk_version - a.min_sdk_version``, if both are set.
-        target_sdk_delta: ``b.target_sdk_version - a.target_sdk_version``, if both are set.
-        size_delta: ``b.size - a.size``, in bytes.
-        permissions_added: Permissions present in ``b`` but not ``a``.
-        permissions_removed: Permissions present in ``a`` but not ``b``.
-        features_added: Features present in ``b`` but not ``a``.
-        features_removed: Features present in ``a`` but not ``b``.
-        libraries_added: Libraries present in ``b`` but not ``a``.
-        libraries_removed: Libraries present in ``a`` but not ``b``.
-        abis_added: ABIs present in ``b`` but not ``a``.
-        abis_removed: ABIs present in ``a`` but not ``b``.
-        langs_added: Locales present in ``b`` but not ``a``.
-        langs_removed: Locales present in ``a`` but not ``b``.
-        signing_changed: Whether ``a`` and ``b`` have no certificate (SHA256) in common. ``None`` if either
+        package_name_changed: Whether `a` and `b` have different package names.
+        version_code_delta: `b.version_code - a.version_code`.
+        version_name_from: `a`'s version name.
+        version_name_to: `b`'s version name.
+        min_sdk_delta: `b.min_sdk_version - a.min_sdk_version`, if both are set.
+        target_sdk_delta: `b.target_sdk_version - a.target_sdk_version`, if both are set.
+        size_delta: `b.size - a.size`, in bytes.
+        permissions_added: Permissions present in `b` but not `a`.
+        permissions_removed: Permissions present in `a` but not `b`.
+        features_added: Features present in `b` but not `a`.
+        features_removed: Features present in `a` but not `b`.
+        libraries_added: Libraries present in `b` but not `a`.
+        libraries_removed: Libraries present in `a` but not `b`.
+        abis_added: ABIs present in `b` but not `a`.
+        abis_removed: ABIs present in `a` but not `b`.
+        langs_added: Locales present in `b` but not `a`.
+        langs_removed: Locales present in `a` but not `b`.
+        signing_changed: Whether `a` and `b` have no certificate (SHA256) in common. `None` if either
             side has no signing information at all.
     """
 
@@ -72,14 +72,14 @@ def _removed(a: Sequence[_T], b: Sequence[_T]) -> tuple[_T, ...]:
 
 def diff(a: ApkFile, b: ApkFile) -> ApkDiff:
     """
-    Compare two :class:`~apkfile.ApkFile`\\ s.
+    Compare two [`ApkFile`][apkfile.ApkFile]s.
 
     >>> diff(old_apk, new_apk).permissions_added
     ('android.permission.CAMERA',)
 
     Args:
         a: The "old"/baseline apk.
-        b: The "new" apk to compare against ``a``.
+        b: The "new" apk to compare against `a`.
     """
     min_sdk_delta = (
         b.min_sdk_version - a.min_sdk_version

@@ -26,10 +26,10 @@ _SIGNATURE_PARSE_ERRORS = (ValueError, struct.error, IndexError, KeyError, EOFEr
 
 class SigningScheme(str, Enum):
     """
-    An `APK signing scheme <https://source.android.com/docs/security/features/apksigning>`_.
+    An [APK signing scheme](https://source.android.com/docs/security/features/apksigning).
 
     Attributes:
-        V1: JAR signing (``META-INF/*.{RSA,DSA,EC}``).
+        V1: JAR signing (`META-INF/*.{RSA,DSA,EC}`).
         V2: APK Signature Scheme v2.
         V3: APK Signature Scheme v3.
         V31: APK Signature Scheme v3.1 (key rotation).
@@ -52,24 +52,23 @@ class Certificate:
     Attributes:
         subject: The certificate subject's distinguished name (human-readable).
         issuer: The certificate issuer's distinguished name (human-readable).
-        canonical_subject: The subject's `canonical, Java-X500Principal-compatible
-            <https://docs.oracle.com/en/java/javase/21/docs/api/java.base/javax/security/auth/x500/X500Principal.html#getName(java.lang.String)>`_
-            form, if it could be computed. Unlike :attr:`subject`, this is safe to use for identity
-            comparisons — two textually-different :attr:`subject` strings can represent the same
+        canonical_subject: The subject's [canonical, Java-X500Principal-compatible](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/javax/security/auth/x500/X500Principal.html#getName(java.lang.String))
+            form, if it could be computed. Unlike `subject`, this is safe to use for identity
+            comparisons — two textually-different `subject` strings can represent the same
             logical name, or vice versa, depending on encoding/whitespace/case.
-        canonical_issuer: The issuer's canonical form; see :attr:`canonical_subject`.
+        canonical_issuer: The issuer's canonical form; see `canonical_subject`.
         serial_number: The certificate's serial number.
         not_before: The start of the certificate's validity period.
         not_after: The end of the certificate's validity period.
         sha1: The SHA1 fingerprint of the DER-encoded certificate (lowercase hex).
         sha256: The SHA256 fingerprint of the DER-encoded certificate (lowercase hex).
         md5: The MD5 fingerprint of the DER-encoded certificate (lowercase hex).
-        public_key_algorithm: The public key's algorithm (e.g. ``"rsa"``, ``"ec"``, ``"dsa"``).
-        public_key_bit_size: The public key's size in bits, if it could be computed (e.g. ``2048``
+        public_key_algorithm: The public key's algorithm (e.g. `"rsa"`, `"ec"`, `"dsa"`).
+        public_key_bit_size: The public key's size in bits, if it could be computed (e.g. `2048`
             for a typical RSA key) — a very small size (e.g. RSA below 2048 bits) is a weak-key smell.
         is_self_signed: Whether the certificate's subject and issuer are the same.
         is_debug: Whether this looks like the standard Android SDK debug certificate
-            (self-signed, subject common name ``"Android Debug"``).
+            (self-signed, subject common name `"Android Debug"`).
     """
 
     subject: str
@@ -88,7 +87,7 @@ class Certificate:
     is_debug: bool
 
     def is_expired(self, at: datetime | None = None) -> bool:
-        """Whether this certificate is expired at ``at`` (defaults to now)."""
+        """Whether this certificate is expired at `at` (defaults to now)."""
         now = at if at is not None else datetime.now(self.not_after.tzinfo)
         return now > self.not_after
 
@@ -104,7 +103,7 @@ class SigningInfo:
         has_duplicate_signature_ids: Whether the APK has multiple v2/v3 signing blocks sharing an
             ID. A verifier normally uses the first and ignores the rest — a discrepancy some tools
             use to smuggle content past one verifier while another sees something different. See
-            `androguard#1030 <https://github.com/androguard/androguard/issues/1030>`_.
+            [androguard#1030](https://github.com/androguard/androguard/issues/1030).
     """
 
     schemes: tuple[SigningScheme, ...]
@@ -171,10 +170,10 @@ def _to_certificate(apk: _AndroguardAPK, asn1_cert: Any) -> Certificate:
 
 
 def build_signing_info(apk: _AndroguardAPK) -> SigningInfo:
-    """Build a :class:`SigningInfo` by probing every signing scheme androguard supports.
+    """Build a [`SigningInfo`][apkfile.SigningInfo] by probing every signing scheme androguard supports.
 
     A scheme whose block is present but unparseable (corrupt/tampered) is treated as not detected,
-    rather than raising — see :data:`_SIGNATURE_PARSE_ERRORS`.
+    rather than raising — see `_SIGNATURE_PARSE_ERRORS`.
     """
     certificates: dict[SigningScheme, tuple[Certificate, ...]] = {}
 

@@ -1,4 +1,4 @@
-"""apkfile — read metadata from, and install, ``.apk``/``.apkm``/``.xapk``/``.apks`` files."""
+"""apkfile — read metadata from, and install, `.apk`/`.apkm`/`.xapk`/`.apks` files."""
 
 from __future__ import annotations
 

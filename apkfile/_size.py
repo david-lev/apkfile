@@ -1,8 +1,8 @@
 """APK size composition and DEX statistics.
 
-DEX method/class/string counts are read straight off each ``classesN.dex``'s fixed-size header with
-``struct`` — no need for androguard's full ``DEX``/bytecode-analysis machinery just to count things.
-See the `dex format spec <https://source.android.com/docs/core/runtime/dex-format#header-item>`_.
+DEX method/class/string counts are read straight off each `classesN.dex`'s fixed-size header with
+`struct` — no need for androguard's full `DEX`/bytecode-analysis machinery just to count things.
+See the [dex format spec](https://source.android.com/docs/core/runtime/dex-format#header-item).
 """
 
 from __future__ import annotations
@@ -28,15 +28,15 @@ class SizeBreakdown:
     """
     An APK's on-disk size, broken down by content category.
 
-    All fields except :attr:`total_compressed` are uncompressed (on-device) sizes in bytes.
+    All fields except `total_compressed` are uncompressed (on-device) sizes in bytes.
 
     Attributes:
-        dex: Size of ``*.dex`` files (compiled bytecode).
-        resources: Size of ``resources.arsc`` and ``res/``.
-        native_libs: Size of ``lib/`` (native ``.so`` libraries).
-        assets: Size of ``assets/``.
-        manifest: Size of ``AndroidManifest.xml``.
-        signing: Size of ``META-INF/`` (signing block + JAR signing files).
+        dex: Size of `*.dex` files (compiled bytecode).
+        resources: Size of `resources.arsc` and `res/`.
+        native_libs: Size of `lib/` (native `.so` libraries).
+        assets: Size of `assets/`.
+        manifest: Size of `AndroidManifest.xml`.
+        signing: Size of `META-INF/` (signing block + JAR signing files).
         other: Size of everything else.
         total_uncompressed: The sum of every entry's uncompressed size.
         total_compressed: The sum of every entry's compressed (as stored in the zip) size.
@@ -71,10 +71,10 @@ class SizeBreakdown:
 @dataclass(frozen=True, slots=True)
 class DexInfo:
     """
-    Aggregate statistics across an APK's ``classesN.dex`` files.
+    Aggregate statistics across an APK's `classesN.dex` files.
 
     Attributes:
-        dex_count: How many ``classesN.dex`` files the APK contains.
+        dex_count: How many `classesN.dex` files the APK contains.
         is_multidex: Whether the APK has more than one dex file.
         method_count: Total number of method references across every dex file.
         class_count: Total number of class definitions across every dex file.
@@ -117,7 +117,7 @@ def _category(name: str) -> str:
 
 
 def build_size_breakdown(zip_file: zipfile.ZipFile) -> SizeBreakdown:
-    """Build a :class:`SizeBreakdown` from an APK's zip entries."""
+    """Build a [`SizeBreakdown`][apkfile.SizeBreakdown] from an APK's zip entries."""
     totals = {
         "dex": 0,
         "resources": 0,
@@ -148,9 +148,9 @@ def _parse_dex_header(data: bytes) -> tuple[int, int, int]:
 
 
 def build_dex_info(apk: _AndroguardAPK) -> DexInfo:
-    """Build a :class:`DexInfo` by reading each dex file's header (no bytecode parsing).
+    """Build a [`DexInfo`][apkfile.DexInfo] by reading each dex file's header (no bytecode parsing).
 
-    A ``classesN.dex`` entry too short/corrupt to have a readable header (e.g. from a tampered or
+    A `classesN.dex` entry too short/corrupt to have a readable header (e.g. from a tampered or
     truncated apk) is skipped rather than raising.
     """
     dex_count = 0
@@ -176,7 +176,7 @@ def build_dex_info(apk: _AndroguardAPK) -> DexInfo:
 
 
 def sum_size_breakdowns(breakdowns: tuple[SizeBreakdown, ...]) -> SizeBreakdown:
-    """Sum multiple :class:`SizeBreakdown`\\ s together (e.g. a bundle's base + splits)."""
+    """Sum multiple [`SizeBreakdown`][apkfile.SizeBreakdown]s together (e.g. a bundle's base + splits)."""
     total = breakdowns[0]
     for breakdown in breakdowns[1:]:
         total = total + breakdown
@@ -184,7 +184,7 @@ def sum_size_breakdowns(breakdowns: tuple[SizeBreakdown, ...]) -> SizeBreakdown:
 
 
 def sum_dex_infos(infos: tuple[DexInfo, ...]) -> DexInfo:
-    """Sum multiple :class:`DexInfo`\\ s together (e.g. a bundle's base + splits)."""
+    """Sum multiple [`DexInfo`][apkfile.DexInfo]s together (e.g. a bundle's base + splits)."""
     total = infos[0]
     for info in infos[1:]:
         total = total + info

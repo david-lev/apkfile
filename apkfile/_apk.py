@@ -1,4 +1,4 @@
-"""``ApkFile`` — a single ``.apk``, parsed in-process with androguard (no ``aapt`` involved)."""
+"""`ApkFile` — a single `.apk`, parsed in-process with androguard (no `aapt` involved)."""
 
 from __future__ import annotations
 
@@ -52,10 +52,10 @@ _PARSE_ERRORS = (
 
 
 def _jsonable(value: Any) -> Any:
-    """Recursively convert dataclass instances (e.g. :class:`SigningInfo`) into plain dicts/lists,
-    so :meth:`ApkFile.as_dict` output round-trips cleanly through ``json.dumps``.
+    """Recursively convert dataclass instances (e.g. [`SigningInfo`][apkfile.SigningInfo]) into plain dicts/lists,
+    so [`ApkFile.as_dict`][apkfile.ApkFile.as_dict] output round-trips cleanly through `json.dumps`.
 
-    Doesn't just delegate to `dataclasses.asdict` because some dataclasses (e.g. :class:`Icon`)
+    Doesn't just delegate to `dataclasses.asdict` because some dataclasses (e.g. [`Icon`][apkfile.Icon])
     carry a private back-reference field (leading underscore) to the `ApkFile` they came from —
     `asdict` would try to deep-copy that too, which is neither cheap nor meaningful for JSON output.
     """
@@ -87,34 +87,34 @@ def _load_apk(source: Path | bytes, *, raw: bool, display_name: str) -> _Androgu
 
 class ApkFile:
     """
-    A single Android ``.apk`` file.
+    A single Android `.apk` file.
 
-    From `fileinfo.com <https://fileinfo.com/extension/apk>`_: An APK file is an app created for Android,
+    From [fileinfo.com](https://fileinfo.com/extension/apk): An APK file is an app created for Android,
     Google's mobile operating system.
-    `APK on Wikipedia ↗️ <https://en.wikipedia.org/wiki/Apk_(file_format)>`_.
+    [APK on Wikipedia ↗️](https://en.wikipedia.org/wiki/Apk_(file_format)).
 
-    All metadata is read directly from ``AndroidManifest.xml``/``resources.arsc`` (via
-    `androguard <https://github.com/androguard/androguard>`_) — no external binary is required.
+    All metadata is read directly from `AndroidManifest.xml`/`resources.arsc` (via
+    [androguard](https://github.com/androguard/androguard)) — no external binary is required.
 
     >>> apk = ApkFile("/home/user/whatsapp.apk")
     >>> apk.package_name, apk.version_code, apk.version_name
     >>> apk.install(upgrade=True)
 
     Attributes:
-        path: Path to the ``.apk`` file, or ``None`` if this instance was constructed from raw bytes
-            (e.g. a split read out of a bundle) and hasn't been :meth:`save`\\ d to disk yet.
+        path: Path to the `.apk` file, or `None` if this instance was constructed from raw bytes
+            (e.g. a split read out of a bundle) and hasn't been [`save`][apkfile.ApkFile.save]d to disk yet.
         package_name: The package name of an Android app uniquely identifies the app on the device, in
             Google Play Store, and in supported third-party Android stores.
-            `↗️ <https://support.google.com/admob/answer/9972781>`_
+            [↗️](https://support.google.com/admob/answer/9972781)
         version_code: An incremental integer value that represents the version of the application code.
-            `↗️ <https://developer.android.com/studio/publish/versioning#appversioning>`_
+            [↗️](https://developer.android.com/studio/publish/versioning#appversioning)
         version_name: A string value that represents the release version of the application code.
         min_sdk_version: The minimum version of the Android platform on which the app will run.
         target_sdk_version: The API level on which the app is designed to run.
         max_sdk_version: The maximum API level on which the app is allowed to run, if capped
-            (``android:maxSdkVersion`` — a discouraged, rarely-used attribute).
+            (`android:maxSdkVersion` — a discouraged, rarely-used attribute).
         install_location: Where the application can be installed: external storage, internal only, or auto.
-        labels: A mapping of locale (``""`` for the default locale) to the app's user-visible label in
+        labels: A mapping of locale (`""` for the default locale) to the app's user-visible label in
             that locale.
         permissions: System permissions the app requests.
         libraries: Shared libraries the app must be linked against.
@@ -124,21 +124,21 @@ class ApkFile:
         supports_any_density: Whether the app includes resources to accommodate any screen density.
         langs: Locales the app has resources for.
         densities: Screen density buckets (dpi) the app ships an icon asset for.
-        abis: Native ABIs the app ships native libraries for (from ``lib/<abi>/...``).
+        abis: Native ABIs the app ships native libraries for (from `lib/<abi>/...`).
         icons: Every app-icon resource declared, one per density/adaptive-icon variant. See
-            :meth:`best_icon` to pick a single one.
+            [`best_icon`][apkfile.ApkFile.best_icon] to pick a single one.
         form_factors: Device form factors (TV/wearable) the app appears to specifically target,
-            per Android's own manifest heuristics — see :class:`~apkfile.FormFactor`.
-        split_name: The ``split`` name of this APK, if it is a split APK.
+            per Android's own manifest heuristics — see [`FormFactor`][apkfile.FormFactor].
+        split_name: The `split` name of this APK, if it is a split APK.
         is_split: Whether this is a split APK.
-        split_type: What the split varies by (language/dpi/abi/other), if :attr:`is_split`.
+        split_type: What the split varies by (language/dpi/abi/other), if `is_split`.
         size: The file size in bytes.
         md5: The MD5 hash of the APK's bytes.
         sha256: The SHA256 hash of the APK's bytes.
         signing: Signing scheme(s) and certificate(s) this APK was signed with.
         security: Manifest security posture — permissions, exported components, deep links.
         size_breakdown: On-disk size, broken down by content category (dex/resources/native libs/...).
-        dex_info: Method/class/string counts across the APK's ``classesN.dex`` files.
+        dex_info: Method/class/string counts across the APK's `classesN.dex` files.
     """
 
     _apk: _AndroguardAPK
@@ -147,7 +147,7 @@ class ApkFile:
     def __init__(self, path: str | os.PathLike[str]) -> None:
         """
         Args:
-            path: Path to the ``.apk`` file.
+            path: Path to the `.apk` file.
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -159,7 +159,7 @@ class ApkFile:
 
     @classmethod
     def _from_bytes(cls, data: bytes, *, name: str) -> ApkFile:
-        """Construct an :class:`ApkFile` from raw bytes, without touching disk (used for bundle splits)."""
+        """Construct an [`ApkFile`][apkfile.ApkFile] from raw bytes, without touching disk (used for bundle splits)."""
         self = cls.__new__(cls)
         self.path = None
         self._name = name
@@ -303,16 +303,16 @@ class ApkFile:
     def best_icon(self, max_dpi: int | None = None) -> Icon | None:
         """
         Pick the single best icon for a given max density, mirroring androguard's own
-        ``APK.get_app_icon`` ranking: the highest-density icon at or below ``max_dpi``.
+        `APK.get_app_icon` ranking: the highest-density icon at or below `max_dpi`.
 
-        Note this means an unbounded (default) call can return a ``nodpi`` icon (density
-        ``65535``) in preference to an ``anydpi`` adaptive icon (density ``65534``) if both are
-        present, since ``nodpi``'s raw density value is (perhaps surprisingly) the higher of the
+        Note this means an unbounded (default) call can return a `nodpi` icon (density
+        `65535`) in preference to an `anydpi` adaptive icon (density `65534`) if both are
+        present, since `nodpi`'s raw density value is (perhaps surprisingly) the higher of the
         two — this matches androguard's actual ranking behavior, not just its docstring's stated
-        intent. Pass an explicit ``max_dpi`` (e.g. the device's real density) to avoid that.
+        intent. Pass an explicit `max_dpi` (e.g. the device's real density) to avoid that.
 
         Args:
-            max_dpi: Only consider icons at or below this density. ``None`` (the default) means
+            max_dpi: Only consider icons at or below this density. `None` (the default) means
                 unbounded.
         """
         candidates = (
@@ -428,17 +428,17 @@ class ApkFile:
 
     @cached_property
     def dex_info(self) -> DexInfo:
-        """Method/class/string counts across this APK's ``classesN.dex`` files."""
+        """Method/class/string counts across this APK's `classesN.dex` files."""
         return build_dex_info(self._apk)
 
     def diff(self, other: ApkFile) -> ApkDiff:
-        """Compare this apk against ``other``. See :func:`apkfile.diff.diff`."""
+        """Compare this apk against `other`. See [`diff`][apkfile.diff]."""
         from .diff import diff as _diff
 
         return _diff(self, other)
 
     def as_zip_file(self) -> zipfile.ZipFile:
-        """Get the apk as a :class:`zipfile.ZipFile` (from disk if :attr:`path` is set, else from memory)."""
+        """Get the apk as a `zipfile.ZipFile` (from disk if `path` is set, else from memory)."""
         if self.path is not None:
             return zipfile.ZipFile(self.path)
         return zipfile.ZipFile(io.BytesIO(self.get_raw()))
@@ -460,10 +460,10 @@ class ApkFile:
 
     def save(self, path: str | os.PathLike[str]) -> None:
         """
-        Write this APK's bytes to ``path``, and update :attr:`path` to point there.
+        Write this APK's bytes to `path`, and update `path` to point there.
 
-        This is mainly useful for :class:`ApkFile` instances obtained from a bundle's ``base``/``splits``,
-        which have ``path is None`` until saved.
+        This is mainly useful for [`ApkFile`][apkfile.ApkFile] instances obtained from a bundle's `base`/`splits`,
+        which have `path is None` until saved.
         """
         target = Path(path)
         target.write_bytes(self.get_raw())
@@ -476,10 +476,10 @@ class ApkFile:
         >>> apk.rename("{package_name}-{version_code}.apk")
 
         Args:
-            name: The new name of the file. Can contain ``{attr}`` format fields for any str/int attribute.
+            name: The new name of the file. Can contain `{attr}` format fields for any str/int attribute.
 
         Raises:
-            ApkFileError: If this instance has no :attr:`path` yet (call :meth:`save` first).
+            ApkFileError: If this instance has no `path` yet (call [`save`][apkfile.ApkFile.save] first).
             TypeError: If a format field isn't a str/int attribute of this instance.
         """
         if self.path is None:
@@ -508,20 +508,20 @@ class ApkFile:
         adb_path: str | os.PathLike[str] | None = None,
     ) -> None:
         """
-        Install this apk on a device using `adb <https://developer.android.com/studio/command-line/adb>`_.
+        Install this apk on a device using [adb](https://developer.android.com/studio/command-line/adb).
 
         Args:
             check: Check that the app is compatible with the device before installing.
-            upgrade: Whether to upgrade the app if it's already installed (``INSTALL_FAILED_ALREADY_EXISTS``).
+            upgrade: Whether to upgrade the app if it's already installed (`INSTALL_FAILED_ALREADY_EXISTS`).
             device_id: The device to install on (if not given, all connected devices are used).
             skip_broken: Skip broken apks instead of raising.
-            installer: The package name of the app performing the installation (e.g. ``com.android.vending``).
+            installer: The package name of the app performing the installation (e.g. `com.android.vending`).
             originating_uri: The URI of the app performing the installation.
-            adb_path: Path to the ``adb`` executable (if not in ``PATH``).
+            adb_path: Path to the `adb` executable (if not in `PATH`).
 
         Raises:
-            AdbNotFoundError: If ``adb`` is not installed.
-            AdbError: If the ``adb`` command failed.
+            AdbNotFoundError: If `adb` is not installed.
+            AdbError: If the `adb` command failed.
         """
         from .install import install_apks
 

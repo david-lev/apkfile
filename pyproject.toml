@@ -56,12 +56,17 @@ dev = [
     "ty>=0.0.65",
     "pre-commit~=4.5",
 ]
+docs = [
+    "mkdocs~=1.6",
+    "mkdocs-material~=9.6",
+    "mkdocstrings[python]~=0.30",
+]
 
 [project.scripts]
 apkfile = "apkfile.__main__:main"
 
 [project.urls]
-"Documentation" = "https://github.com/david-lev/apkfile#readme"
+"Documentation" = "https://apkfile.readthedocs.io"
 "Issue Tracker" = "https://github.com/david-lev/apkfile/issues"
 "Source Code" = "https://github.com/david-lev/apkfile"
 "Changelog" = "https://github.com/david-lev/apkfile/blob/master/CHANGELOG.md"
