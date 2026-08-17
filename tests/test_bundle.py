@@ -189,6 +189,22 @@ def test_apkm_install_extracts_to_temp_dir_and_calls_install_apks(
     assert all(p.suffix == ".apk" for p in apk_paths)
 
 
+def test_apkm_uninstall_delegates_to_uninstall_apks(
+    make_apkm: Callable[..., str], mocker
+) -> None:
+    mock_uninstall = mocker.patch("apkfile.install.uninstall_apks")
+    apkm = ApkmFile(make_apkm())
+    apkm.uninstall(keep_data=True)
+    mock_uninstall.assert_called_once_with(
+        "com.politedroid",
+        device_id=None,
+        keep_data=True,
+        user=None,
+        version_code=None,
+        adb_path=None,
+    )
+
+
 def test_apkm_as_dict_and_repr(make_apkm: Callable[..., str]) -> None:
     apkm = ApkmFile(make_apkm())
     as_dict = apkm.as_dict()
@@ -216,6 +232,66 @@ def test_xapk_signing_security_size_dex(make_xapk: Callable[..., str]) -> None:
     assert xapk.dex_info == xapk.base.dex_info + xapk.splits[0].dex_info
     assert xapk.dex_info.dex_count == 2
     assert "android.permission.READ_CALENDAR" in xapk.security.dangerous_permissions
+
+
+def test_xapk_obb_files_absent_by_default(make_xapk: Callable[..., str]) -> None:
+    xapk = XapkFile(make_xapk())
+    assert xapk.obb_files == ()
+
+
+def test_xapk_obb_files_parsed_from_expansions(make_xapk: Callable[..., str]) -> None:
+    xapk = XapkFile(make_xapk(with_obb=True))
+    # the third declared expansion has no matching zip entry and is silently skipped.
+    assert len(xapk.obb_files) == 2
+
+    main, patch = xapk.obb_files
+    assert main.name == "main.4.com.politedroid.obb"
+    assert main.is_patch is False
+    assert main.size == len(b"main-obb-bytes")
+    assert main.read_bytes() == b"main-obb-bytes"
+
+    assert patch.name == "patch.4.com.politedroid.obb"
+    assert patch.is_patch is True
+    assert patch.read_bytes() == b"patch-obb-bytes"
+
+
+def test_xapk_obb_file_extract(make_xapk: Callable[..., str], tmp_path) -> None:
+    xapk = XapkFile(make_xapk(with_obb=True))
+    out = tmp_path / "main.obb"
+    xapk.obb_files[0].extract(out)
+    assert out.read_bytes() == b"main-obb-bytes"
+
+
+def test_xapk_install_pushes_bundled_obb_files(
+    make_xapk: Callable[..., str], mocker
+) -> None:
+    mock_install = mocker.patch("apkfile.install.install_apks")
+    xapk = XapkFile(make_xapk(with_obb=True))
+    xapk.install()
+    kwargs = mock_install.call_args.kwargs
+    obb_paths = kwargs["obb_paths"]
+    assert obb_paths is not None
+    assert len(obb_paths) == 2
+    assert any(p.endswith("main.4.com.politedroid.obb") for p in obb_paths)
+    assert any(p.endswith("patch.4.com.politedroid.obb") for p in obb_paths)
+
+
+def test_xapk_install_without_obb_passes_none(
+    make_xapk: Callable[..., str], mocker
+) -> None:
+    mock_install = mocker.patch("apkfile.install.install_apks")
+    xapk = XapkFile(make_xapk())
+    xapk.install()
+    assert mock_install.call_args.kwargs["obb_paths"] is None
+
+
+def test_xapk_obb_files_in_as_dict(make_xapk: Callable[..., str]) -> None:
+    xapk = XapkFile(make_xapk(with_obb=True))
+    as_dict = xapk.as_dict()
+    assert as_dict["obb_files"] == [
+        {"name": "main.4.com.politedroid.obb", "is_patch": False, "size": 14},
+        {"name": "patch.4.com.politedroid.obb", "is_patch": True, "size": 15},
+    ]
 
 
 def test_apks_v2(make_apks: Callable[..., str]) -> None:

@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-## [apkfile](https://github.com/david-lev/apkfile) • Read, inspect, and install Android app packages
+<h2 align="center"><a href="https://github.com/david-lev/apkfile">apkfile</a> • Read, inspect, and install Android app packages</h2>
 
 <p align="center">
   <a href="https://pypi.org/project/apkfile/"><img src="https://img.shields.io/pypi/v/apkfile?color=%2334D058&label=pypi" alt="PyPI Version"/></a>
@@ -19,10 +19,10 @@
   <a href="https://www.codefactor.io/repository/github/david-lev/apkfile/overview/main"><img src="https://www.codefactor.io/repository/github/david-lev/apkfile/badge/main" alt="Code Quality"/></a>
 </p>
 
-apkfile reads metadata out of Android `.apk`, `.apkm`, `.xapk`, and `.apks` files — package name, version,
-permissions, supported ABIs/languages/densities, icons, signing certificates, manifest security posture
-(exported components, deep links, dangerous permissions), size/DEX composition, and more — and can install
-them to a connected device over `adb`, or diff two apks against each other.
+apkfile reads metadata out of Android `.apk`, `.apkm`, `.xapk`, `.apks`, and `.apkv` files — package name,
+version, permissions, supported ABIs/languages/densities, icons, signing certificates, manifest security
+posture (exported components, deep links, dangerous permissions), size/DEX composition, OBB expansion files,
+and more — and can install them to a connected device over `adb`, or diff two apks against each other.
 
 Full documentation: **[apkfile.readthedocs.io](https://apkfile.readthedocs.io)**
 
@@ -37,7 +37,7 @@ uv add apkfile
 ### Usage
 
 ```python
-from apkfile import ApkFile, XapkFile, ApkmFile, ApksFile
+from apkfile import ApkFile, XapkFile, ApkmFile, ApksFile, ApkvFile
 
 # Get apk info
 apk = ApkFile("/home/david/Downloads/wa.apk")
@@ -86,6 +86,27 @@ print(xapk.abis, xapk.permissions, xapk.langs)
 # Get apks info
 apks = ApksFile("/home/david/Downloads/facebook.apks")
 print(apks.base.permissions, apks.md5, apks.sha256)
+
+# Get apkv info (VInstall's format — https://github.com/vinstall/apkv-spec); optionally encrypted
+apkv = ApkvFile(
+    "/home/david/Downloads/backup.apkv", password="hunter2"
+)  # password=None if unencrypted
+print(apkv.app_name, apkv.exported_at)
+
+# XAPK-bundled OBB expansion files, and pushing a standalone OBB alongside a plain apk ("apk + obb")
+for obb in xapk.obb_files:
+    print(obb.name, obb.is_patch, obb.size)
+xapk.install()  # bundled OBBs are pushed to /sdcard/Android/obb/<package>/ automatically
+apk.install(obb_paths=["main.1.com.example.game.obb"])
+
+# Installing to every connected device happens in parallel, not one at a time
+apk.install(grant_permissions=True, allow_downgrade=True)  # pm install -g -d
+
+# Uninstall (same multi-device behavior as install: every connected device, in parallel)
+apk.uninstall()
+from apkfile import uninstall_apks
+
+uninstall_apks("com.example.app", keep_data=True)
 ```
 
 ### CLI
@@ -95,6 +116,7 @@ apkfile info app.apk              # print an apk/bundle's metadata as JSON
 apkfile diff old.apk new.apk      # print the differences between two apks/bundles as JSON
 apkfile install app.apk           # install to connected device(s)
 apkfile install app.apk --upgrade --installer com.android.vending --adb-path /path/to/adb
+apkfile uninstall com.example.app # uninstall from connected device(s)
 ```
 
 ### How this library works

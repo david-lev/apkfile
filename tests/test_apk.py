@@ -170,6 +170,25 @@ def test_install_with_path_delegates_to_install_apks(
         skip_broken=False,
         installer=None,
         originating_uri=None,
+        grant_permissions=False,
+        allow_downgrade=False,
+        allow_test_packages=False,
+        user=None,
+        obb_paths=None,
+        adb_path=None,
+    )
+
+
+def test_uninstall_delegates_to_uninstall_apks(politedroid_path: str, mocker) -> None:
+    mock_uninstall = mocker.patch("apkfile.install.uninstall_apks")
+    apk = ApkFile(politedroid_path)
+    apk.uninstall(keep_data=True, device_id="emulator-5554")
+    mock_uninstall.assert_called_once_with(
+        "com.politedroid",
+        device_id="emulator-5554",
+        keep_data=True,
+        user=None,
+        version_code=None,
         adb_path=None,
     )
 

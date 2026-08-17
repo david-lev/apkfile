@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0]
+
+### Added
+
+- `ApkvFile`: read [VInstall](https://github.com/vinstall/VInstall)'s `.apkv` bundle format (see the
+  [APKv spec](https://github.com/vinstall/apkv-spec)), including its optional password-encrypted layout
+  (AES-256-CBC + PBKDF2-HMAC-SHA256). New `EncryptedBundleError` for a missing/incorrect password.
+- `XapkFile.obb_files` (`ObbFile`): OBB expansion file metadata (main/patch, size, on-device filename)
+  parsed from a `.xapk`'s `manifest.json`.
+- `obb_paths` on `install_apks()`/`ApkFile.install()`/every bundle's `.install()`: push OBB expansion
+  files to `/sdcard/Android/obb/<package>/` after a successful install — covers both a `.xapk`'s bundled
+  OBBs (pushed automatically) and a standalone "apk + obb" pairing.
+- `uninstall_apks()` (+ `ApkFile.uninstall()`/every bundle's `.uninstall()`): uninstall a package from
+  device(s), with the same parallel multi-device behavior as `install_apks()`. New `apkfile uninstall
+  <package>` CLI subcommand.
+- `install_apks()`/`.install()` gained `grant_permissions` (`pm install -g`), `allow_downgrade` (`-d`),
+  `allow_test_packages` (`-t`), and `user` (`--user`).
+- `install_apks()` now installs to every connected device in parallel (one thread per device) instead of
+  one at a time.
+- `apkfile info --password <pw>` (CLI), for opening an encrypted `.apkv`.
+
+### Fixed
+
+- A failure on one device no longer aborts installing/uninstalling on the rest of the connected devices —
+  every device is now attempted independently, and a single error summarizing every failure is raised only
+  after all devices have finished. (Previously, a failure at almost any point in the per-device flow,
+  including the very first `mktemp` call, silently skipped every other connected device.)
+- Language-split selection now matches against every locale the device has configured
+  (`persist.sys.locales`, Android 7.0+), not just the primary one — a device with e.g. English *and*
+  Hebrew configured now gets both matching splits instead of only one. Locale detection also now falls
+  back through `persist.sys.locale` → the live Settings.System `system_locales` value →
+  `ro.product.locale`, since a freshly-booted/headless emulator can leave the first two completely unset.
+
 ## [1.0.1]
 
 Documentation-only release (no code changes) — republished so PyPI's project page picks up the refreshed

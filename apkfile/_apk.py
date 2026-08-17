@@ -505,6 +505,14 @@ class ApkFile:
         skip_broken: bool = False,
         installer: str | None = None,
         originating_uri: str | None = None,
+        grant_permissions: bool = False,
+        allow_downgrade: bool = False,
+        allow_test_packages: bool = False,
+        user: str | None = None,
+        obb_paths: str
+        | os.PathLike[str]
+        | Iterable[str | os.PathLike[str]]
+        | None = None,
         adb_path: str | os.PathLike[str] | None = None,
     ) -> None:
         """
@@ -517,6 +525,13 @@ class ApkFile:
             skip_broken: Skip broken apks instead of raising.
             installer: The package name of the app performing the installation (e.g. `com.android.vending`).
             originating_uri: The URI of the app performing the installation.
+            grant_permissions: Grant all runtime permissions the app requests at install time.
+            allow_downgrade: Allow installing a lower `versionCode` over an existing install (the device
+                only honors this for a `debuggable` app, regardless of this flag).
+            allow_test_packages: Allow installing apps built with `android:testOnly="true"`.
+            user: Install for a specific user id, or `"all"`/`"current"`.
+            obb_paths: Path(s) to OBB expansion file(s) to push alongside this apk (an "apk + obb"
+                pairing) — pushed to `/sdcard/Android/obb/<package>/` after a successful install.
             adb_path: Path to the `adb` executable (if not in `PATH`).
 
         Raises:
@@ -534,6 +549,11 @@ class ApkFile:
                 skip_broken=skip_broken,
                 installer=installer,
                 originating_uri=originating_uri,
+                grant_permissions=grant_permissions,
+                allow_downgrade=allow_downgrade,
+                allow_test_packages=allow_test_packages,
+                user=user,
+                obb_paths=obb_paths,
                 adb_path=adb_path,
             )
             return
@@ -549,8 +569,48 @@ class ApkFile:
                 skip_broken=skip_broken,
                 installer=installer,
                 originating_uri=originating_uri,
+                grant_permissions=grant_permissions,
+                allow_downgrade=allow_downgrade,
+                allow_test_packages=allow_test_packages,
+                user=user,
+                obb_paths=obb_paths,
                 adb_path=adb_path,
             )
+
+    def uninstall(
+        self,
+        *,
+        device_id: str | None = None,
+        keep_data: bool = False,
+        user: str | None = None,
+        version_code: int | None = None,
+        adb_path: str | os.PathLike[str] | None = None,
+    ) -> None:
+        """
+        Uninstall this apk's package from a device using
+        [adb](https://developer.android.com/studio/command-line/adb).
+
+        Args:
+            device_id: The device to uninstall from (if not given, all connected devices are used).
+            keep_data: Keep the app's data/cache directories after removal.
+            user: Uninstall for a specific user id only.
+            version_code: Only uninstall if the installed app has this exact `versionCode`.
+            adb_path: Path to the `adb` executable (if not in `PATH`).
+
+        Raises:
+            AdbNotFoundError: If `adb` is not installed.
+            AdbError: If the `adb` command failed.
+        """
+        from .install import uninstall_apks
+
+        uninstall_apks(
+            self.package_name,
+            device_id=device_id,
+            keep_data=keep_data,
+            user=user,
+            version_code=version_code,
+            adb_path=adb_path,
+        )
 
     _FIELDS: tuple[str, ...] = (
         "path",

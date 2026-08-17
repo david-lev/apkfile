@@ -6,6 +6,7 @@ __all__ = [
     "AdbError",
     "AdbNotFoundError",
     "ApkFileError",
+    "EncryptedBundleError",
     "InvalidApkError",
     "InvalidBundleError",
 ]
@@ -20,7 +21,11 @@ class InvalidApkError(ApkFileError):
 
 
 class InvalidBundleError(ApkFileError):
-    """Raised when a `.apkm`/`.xapk`/`.apks` archive is corrupt or missing its manifest."""
+    """Raised when a `.apkm`/`.xapk`/`.apks`/`.apkv` archive is corrupt or missing its manifest."""
+
+
+class EncryptedBundleError(InvalidBundleError):
+    """Raised when an encrypted `.apkv` archive is opened without a password, or with the wrong one."""
 
 
 class AdbError(ApkFileError):

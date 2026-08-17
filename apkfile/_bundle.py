@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ._apk import ApkFile, _jsonable
+from ._obb import ObbFile
 from ._resources import ScreenSize
 from ._security import SecurityInfo
 from ._signing import SigningInfo
@@ -38,6 +39,7 @@ class _BaseBundle:
     version_code: int
     _base_name: str
     _icon_name: str
+    _manifest: dict[str, Any]
     _BASE_FIELDS: tuple[str, ...] = (
         "path",
         "package_name",
@@ -94,6 +96,7 @@ class _BaseBundle:
             raise InvalidBundleError(
                 f"{self.path!r} has an invalid {manifest_name!r} manifest"
             ) from e
+        self._manifest = info
 
         def _coerce(typ: type, value: Any, *, key: str) -> Any:
             try:
@@ -338,8 +341,14 @@ class _BaseBundle:
                 )
             values[field] = value
         new_path = self.path.parent / name.format(**values)
-        self._zip.close()
+        self._close_for_rename()
         self.path = self.path.rename(new_path)
+        self._reopen_after_rename()
+
+    def _close_for_rename(self) -> None:
+        self._zip.close()
+
+    def _reopen_after_rename(self) -> None:
         self._zip = zipfile.ZipFile(self.path)
 
     def install(
@@ -350,14 +359,22 @@ class _BaseBundle:
         device_id: str | None = None,
         installer: str | None = None,
         originating_uri: str | None = None,
+        grant_permissions: bool = False,
+        allow_downgrade: bool = False,
+        allow_test_packages: bool = False,
+        user: str | None = None,
+        obb_paths: str
+        | os.PathLike[str]
+        | Iterable[str | os.PathLike[str]]
+        | None = None,
         adb_path: str | os.PathLike[str] | None = None,
     ) -> None:
         """
         Install this bundle's base + splits on a device using
         [adb](https://developer.android.com/studio/command-line/adb).
 
-        The base and splits are extracted to a temporary directory for the duration of the install, and
-        cleaned up automatically afterwards.
+        The base and splits (and, for a `.xapk` with `obb_files`, its bundled OBBs) are extracted to a
+        temporary directory for the duration of the install, and cleaned up automatically afterwards.
 
         Args:
             check: Check that the app is compatible with the device before installing.
@@ -365,6 +382,14 @@ class _BaseBundle:
             device_id: The device to install on (if not given, all connected devices are used).
             installer: The package name of the app performing the installation (e.g. `com.android.vending`).
             originating_uri: The URI of the app performing the installation.
+            grant_permissions: Grant all runtime permissions the app requests at install time.
+            allow_downgrade: Allow installing a lower `versionCode` over an existing install (the device
+                only honors this for a `debuggable` app, regardless of this flag).
+            allow_test_packages: Allow installing apps built with `android:testOnly="true"`.
+            user: Install for a specific user id, or `"all"`/`"current"`.
+            obb_paths: Path(s) to extra OBB expansion file(s) to push alongside any this bundle already
+                carries (see `XapkFile.obb_files`) — pushed to `/sdcard/Android/obb/<package>/` after a
+                successful install.
             adb_path: Path to the `adb` executable (if not in `PATH`).
 
         Raises:
@@ -385,6 +410,18 @@ class _BaseBundle:
                 split_path.write_bytes(split.get_raw())
                 apk_paths.append(split_path)
 
+            obb_local_paths = (
+                []
+                if obb_paths is None
+                else [str(Path(obb_paths))]
+                if isinstance(obb_paths, (str, os.PathLike))
+                else [str(Path(o)) for o in obb_paths]
+            )
+            for i, obb in enumerate(getattr(self, "obb_files", ())):
+                obb_path = Path(tmp_dir) / (obb.name or f"obb_{i}.obb")
+                obb_path.write_bytes(obb.read_bytes())
+                obb_local_paths.append(str(obb_path))
+
             install_apks(
                 apks=apk_paths,
                 check=check,
@@ -392,8 +429,48 @@ class _BaseBundle:
                 device_id=device_id,
                 installer=installer,
                 originating_uri=originating_uri,
+                grant_permissions=grant_permissions,
+                allow_downgrade=allow_downgrade,
+                allow_test_packages=allow_test_packages,
+                user=user,
+                obb_paths=obb_local_paths or None,
                 adb_path=adb_path,
             )
+
+    def uninstall(
+        self,
+        *,
+        device_id: str | None = None,
+        keep_data: bool = False,
+        user: str | None = None,
+        version_code: int | None = None,
+        adb_path: str | os.PathLike[str] | None = None,
+    ) -> None:
+        """
+        Uninstall this bundle's package from a device using
+        [adb](https://developer.android.com/studio/command-line/adb).
+
+        Args:
+            device_id: The device to uninstall from (if not given, all connected devices are used).
+            keep_data: Keep the app's data/cache directories after removal.
+            user: Uninstall for a specific user id only.
+            version_code: Only uninstall if the installed app has this exact `versionCode`.
+            adb_path: Path to the `adb` executable (if not in `PATH`).
+
+        Raises:
+            AdbNotFoundError: If `adb` is not installed.
+            AdbError: If the `adb` command failed.
+        """
+        from .install import uninstall_apks
+
+        uninstall_apks(
+            self.package_name,
+            device_id=device_id,
+            keep_data=keep_data,
+            user=user,
+            version_code=version_code,
+            adb_path=adb_path,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """Return a dict representation of the bundle."""
@@ -481,11 +558,12 @@ class XapkFile(_BaseBundle):
         splits: The split apks.
         app_name: The app's name, as recorded by APKPure.
         xapk_version: The version of the `.xapk` format itself.
+        obb_files: OBB expansion files bundled inside the archive (empty if none are declared).
 
     See [`ApkFile`][apkfile.ApkFile] for the rest of the shared attributes (`package_name`, `version_code`, ...).
     """
 
-    _EXTRA_FIELDS = ("app_name", "xapk_version")
+    _EXTRA_FIELDS = ("app_name", "xapk_version", "obb_files")
     app_name: str
     xapk_version: int
 
@@ -517,6 +595,30 @@ class XapkFile(_BaseBundle):
             },
             skip_broken_splits=skip_broken_splits,
         )
+
+    @cached_property
+    def obb_files(self) -> tuple[ObbFile, ...]:
+        """OBB expansion files declared by `manifest.json`'s `expansions` list."""
+        obb_files: list[ObbFile] = []
+        for expansion in self._manifest.get("expansions") or ():
+            zip_name = expansion.get("file")
+            if not zip_name:
+                continue
+            try:
+                zip_info = self._zip.getinfo(zip_name)
+            except KeyError:
+                continue  # declared in the manifest but not actually present in the zip
+            name = PurePosixPath(zip_name).name
+            obb_files.append(
+                ObbFile(
+                    name=name,
+                    is_patch=name.lower().startswith("patch."),
+                    size=zip_info.file_size,
+                    _zip_name=zip_name,
+                    _bundle=self,
+                )
+            )
+        return tuple(obb_files)
 
 
 class ApksFile(_BaseBundle):

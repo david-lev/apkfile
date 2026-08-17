@@ -15,13 +15,13 @@ nav:
   - Quickstart: quickstart.md
   - API Reference:
       - ApkFile: reference/apk.md
-      - Bundles (Apkm/Xapk/Apks): reference/bundle.md
+      - Bundles (Apkm/Xapk/Apks/Apkv): reference/bundle.md
       - Signing: reference/signing.md
       - Security: reference/security.md
       - Size & DEX: reference/size.md
       - Resources & Icons: reference/resources.md
       - Diffing: reference/diff.md
-      - Installing (adb): reference/install.md
+      - Installing/Uninstalling (adb): reference/install.md
       - Enums (Abi, FormFactor, ...): reference/enums.md
       - Exceptions: reference/exceptions.md
 
