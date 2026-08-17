@@ -19,6 +19,7 @@ from typing import Any
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from loguru import logger
 
 from ._bundle import _BaseBundle
 from .exceptions import EncryptedBundleError, InvalidBundleError
@@ -122,11 +123,14 @@ class ApkvFile(_BaseBundle):
             EncryptedBundleError: If the archive is encrypted and `password` is missing or wrong.
         """
         self.path = Path(path)
+        logger.debug("Loading .apkv from {}", self.path)
         self._skip_broken_splits = skip_broken_splits
         self._eager: dict[str, Any] = {}
         self._password: str | None = None
         self._outer_zip = zipfile.ZipFile(self.path)
         self._encrypted = _ENCRYPTED_SENTINEL in self._outer_zip.namelist()
+        if self._encrypted:
+            logger.debug("{} is password-encrypted", self.path)
 
         manifest = (
             self._read_encrypted_manifest(password)
@@ -166,6 +170,7 @@ class ApkvFile(_BaseBundle):
         self._icon_name = "icon.webp"
 
         if verify_checksums:
+            logger.debug("Verifying checksums for {} split(s)", len(splits))
             self._verify_checksums(manifest.get("checksums") or {}, splits)
 
     def _read_plain_manifest(self) -> dict[str, Any]:
@@ -189,6 +194,7 @@ class ApkvFile(_BaseBundle):
                 f"{self.path!r} is password-encrypted; pass password=..."
             )
         self._password = password
+        logger.debug("Decrypting manifest.enc for {}", self.path)
         try:
             manifest_blob = self._outer_zip.read("manifest.enc")
         except KeyError as e:
@@ -207,6 +213,7 @@ class ApkvFile(_BaseBundle):
                 f"Incorrect password for {self.path!r} (or a corrupt archive)"
             )
 
+        logger.debug("Decrypting payload.enc for {}", self.path)
         try:
             payload_blob = self._outer_zip.read("payload.enc")
         except KeyError as e:

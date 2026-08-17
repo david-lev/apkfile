@@ -10,11 +10,37 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import loguru
+
+from . import __version__
 from ._apk import ApkFile
 from ._apkv import ApkvFile
 from ._bundle import ApkmFile, ApksFile, XapkFile
 from .diff import diff as diff_apks
 from .install import install_apks, uninstall_apks
+
+_LOG_FORMAT = (
+    "<green>{time:HH:mm:ss}</green> <level>{level: <8}</level> <level>{message}</level>"
+)
+
+
+def _configure_logging(verbosity: int) -> None:
+    """Wire up apkfile's logging for CLI use (disabled by default — see `apkfile/__init__.py`).
+
+    `-v` shows INFO-level milestones (e.g. per-device install/uninstall progress); `-vv` also
+    shows DEBUG (every individual `adb` command).
+    """
+    if verbosity <= 0:
+        return
+    loguru.logger.enable("apkfile")
+    loguru.logger.remove()
+    loguru.logger.add(
+        sys.stderr,
+        level="DEBUG" if verbosity >= 2 else "INFO",
+        colorize=True,
+        format=_LOG_FORMAT,
+    )
+
 
 _LOADERS: dict[str, Callable[..., Any]] = {
     ".apk": ApkFile,
@@ -22,6 +48,12 @@ _LOADERS: dict[str, Callable[..., Any]] = {
     ".xapk": XapkFile,
     ".apks": ApksFile,
     ".apkv": ApkvFile,
+}
+# The bundle formats among `_LOADERS` — each wraps a base apk + splits behind its own `.install()`
+# (which extracts them to a temp dir first), unlike a bare `.apk` path that `install_apks()` can
+# take directly.
+_BUNDLE_LOADERS: dict[str, Callable[..., Any]] = {
+    k: v for k, v in _LOADERS.items() if k != ".apk"
 }
 
 
@@ -48,6 +80,31 @@ def _cmd_diff(args: argparse.Namespace) -> None:
 
 
 def _cmd_install(args: argparse.Namespace) -> None:
+    # A bundle (.apkm/.xapk/.apks/.apkv) is a single archive containing its own base+splits (and,
+    # for .xapk, OBBs) — it needs its own `.install()`, which extracts them to a temp dir first,
+    # rather than being handed straight to `install_apks()` like a plain .apk path/paths.
+    suffix = Path(args.paths[0]).suffix.lower() if len(args.paths) == 1 else None
+    bundle_loader = _BUNDLE_LOADERS.get(suffix) if suffix else None
+    if bundle_loader is not None:
+        loader_kwargs: dict[str, Any] = {"skip_broken_splits": args.skip_broken}
+        if suffix == ".apkv":
+            loader_kwargs["password"] = args.password
+        bundle = bundle_loader(args.paths[0], **loader_kwargs)
+        bundle.install(
+            check=not args.no_check,
+            upgrade=args.upgrade,
+            device_id=args.device,
+            installer=args.installer,
+            originating_uri=args.originating_uri,
+            grant_permissions=args.grant_permissions,
+            allow_downgrade=args.allow_downgrade,
+            allow_test_packages=args.allow_test_packages,
+            user=args.user,
+            obb_paths=args.obb,
+            adb_path=args.adb_path,
+        )
+        return
+
     install_apks(
         apks=args.paths,
         check=not args.no_check,
@@ -77,10 +134,29 @@ def _cmd_uninstall(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # A `parents=[...]` mixin, added to every *subparser* (not the top-level parser — argparse's
+    # subparsers action always reparses its remaining args into a fresh namespace and copies that
+    # over the outer one, so a same-named attribute set on the top-level parser would just get
+    # silently clobbered back to its default; confirmed hands-on), so `-v`/`--verbose` is used as
+    # `apkfile install ... -v`, not `apkfile -v install ...`.
+    verbose_parent = argparse.ArgumentParser(add_help=False)
+    verbose_parent.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase log verbosity (-v for progress, -vv for every adb command)",
+    )
+
     parser = argparse.ArgumentParser(prog="apkfile")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    info = subparsers.add_parser("info", help="Print an apk/bundle's metadata as JSON")
+    info = subparsers.add_parser(
+        "info", help="Print an apk/bundle's metadata as JSON", parents=[verbose_parent]
+    )
     info.add_argument("path", help="Path to a .apk/.apkm/.xapk/.apks/.apkv file")
     info.add_argument(
         "--password", default=None, help="Password for an encrypted .apkv archive"
@@ -88,7 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
     info.set_defaults(func=_cmd_info)
 
     diff = subparsers.add_parser(
-        "diff", help="Print the differences between two apks/bundles as JSON"
+        "diff",
+        help="Print the differences between two apks/bundles as JSON",
+        parents=[verbose_parent],
     )
     diff.add_argument("a", help="Path to the baseline .apk/.apkm/.xapk/.apks file")
     diff.add_argument(
@@ -97,10 +175,18 @@ def build_parser() -> argparse.ArgumentParser:
     diff.set_defaults(func=_cmd_diff)
 
     install = subparsers.add_parser(
-        "install", help="Install apk(s) to connected device(s)"
+        "install",
+        help="Install apk(s) to connected device(s)",
+        parents=[verbose_parent],
     )
     install.add_argument(
-        "paths", nargs="+", help="Path(s) to .apk file(s) (a base apk + its splits)"
+        "paths",
+        nargs="+",
+        help="Path(s) to .apk file(s) (a base apk + its splits), or a single "
+        ".apkm/.xapk/.apks/.apkv bundle",
+    )
+    install.add_argument(
+        "--password", default=None, help="Password for an encrypted .apkv bundle"
     )
     install.add_argument("--device", default=None, help="Target a specific device id")
     install.add_argument(
@@ -157,7 +243,9 @@ def build_parser() -> argparse.ArgumentParser:
     install.set_defaults(func=_cmd_install)
 
     uninstall = subparsers.add_parser(
-        "uninstall", help="Uninstall a package from connected device(s)"
+        "uninstall",
+        help="Uninstall a package from connected device(s)",
+        parents=[verbose_parent],
     )
     uninstall.add_argument("package", help="Package name to uninstall")
     uninstall.add_argument("--device", default=None, help="Target a specific device id")
@@ -186,6 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    _configure_logging(args.verbose)
     args.func(args)
 
 

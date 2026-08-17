@@ -16,11 +16,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from androguard.core.apk import APK as _AndroguardAPK
+from loguru import logger
 
 from ._resources import DensityBucket, Icon, ScreenSize
 from ._security import SecurityInfo, build_security_info
 from ._signing import SigningInfo, build_signing_info
 from ._size import DexInfo, SizeBreakdown, build_dex_info, build_size_breakdown
+from ._util import sanitize_filename_component
 from .abi import Abi
 from .enums import FormFactor, InstallLocation, SplitType, classify_split
 from .exceptions import ApkFileError, InvalidApkError
@@ -155,6 +157,7 @@ class ApkFile:
         """
         self.path = Path(path)
         self._name = self.path.name
+        logger.debug("Loading apk from {}", self.path)
         self._apk = _load_apk(self.path, raw=False, display_name=str(self.path))
 
     @classmethod
@@ -163,6 +166,7 @@ class ApkFile:
         self = cls.__new__(cls)
         self.path = None
         self._name = name
+        logger.debug("Loading apk {!r} from {} raw bytes", name, len(data))
         self._apk = _load_apk(data, raw=True, display_name=name)
         return self
 
@@ -444,7 +448,9 @@ class ApkFile:
         return zipfile.ZipFile(io.BytesIO(self.get_raw()))
 
     def extract(
-        self, path: str | os.PathLike[str], members: Iterable[str] | None = None
+        self,
+        path: str | os.PathLike[str] = ".",
+        members: Iterable[str] | None = None,
     ) -> None:
         """
         Extract files from within the apk to a directory.
@@ -452,20 +458,26 @@ class ApkFile:
         >>> apk.extract(path="out", members=["AndroidManifest.xml"])
 
         Args:
-            path: Path to the directory to extract to.
+            path: Path to the directory to extract to. Defaults to the current working directory.
             members: An optional list of names to extract. If not provided, all files will be extracted.
         """
+        logger.info("Extracting {} to {}", self.path or self._name, path)
         with self.as_zip_file() as zf:
             zf.extractall(path=path, members=members)
 
-    def save(self, path: str | os.PathLike[str]) -> None:
+    def save(self, path: str | os.PathLike[str] | None = None) -> None:
         """
         Write this APK's bytes to `path`, and update `path` to point there.
 
         This is mainly useful for [`ApkFile`][apkfile.ApkFile] instances obtained from a bundle's `base`/`splits`,
         which have `path is None` until saved.
+
+        Args:
+            path: Where to write the apk. Defaults to this apk's own filename (`self._name`) in the
+                current working directory.
         """
-        target = Path(path)
+        target = Path(path) if path is not None else Path.cwd() / self._name
+        logger.info("Saving apk to {}", target)
         target.write_bytes(self.get_raw())
         self.path = target
 
@@ -477,6 +489,9 @@ class ApkFile:
 
         Args:
             name: The new name of the file. Can contain `{attr}` format fields for any str/int attribute.
+                Values substituted into `{attr}` fields have filesystem-illegal characters (`<>:"/\\|?*`,
+                relevant on Windows even though POSIX only forbids `/`) replaced with `_`, since those
+                values can carry arbitrary apk-controlled text (e.g. `version_name`).
 
         Raises:
             ApkFileError: If this instance has no `path` yet (call [`save`][apkfile.ApkFile.save] first).
@@ -492,8 +507,11 @@ class ApkFile:
                 raise TypeError(
                     f"{field!r} is not a str/int attribute of {self.__class__.__name__}"
                 )
-            values[field] = value
+            values[field] = (
+                sanitize_filename_component(value) if isinstance(value, str) else value
+            )
         new_path = self.path.parent / name.format(**values)
+        logger.info("Renaming apk {} -> {}", self.path, new_path)
         self.path = self.path.rename(new_path)
 
     def install(

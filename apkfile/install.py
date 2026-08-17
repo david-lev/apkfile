@@ -10,6 +10,8 @@ from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from loguru import logger
+
 from ._apk import ApkFile
 from ._resources import DensityBucket
 from .abi import Abi
@@ -25,6 +27,7 @@ def _find_adb(adb_path: str | os.PathLike[str] | None) -> str:
         raise AdbNotFoundError(
             "adb is not installed or not in PATH. See https://developer.android.com/studio/command-line/adb"
         )
+    logger.debug("Using adb at {}", path)
     return path
 
 
@@ -36,10 +39,13 @@ def _apk_path(apk: ApkFile) -> str:
 
 
 def _run(args: Sequence[str]) -> str:
+    logger.debug("$ {}", " ".join(args))
     try:
         result = subprocess.run(args, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as e:
-        raise AdbError((e.stderr or e.stdout or str(e)).strip()) from e
+        message = (e.stderr or e.stdout or str(e)).strip()
+        logger.error("Command failed: {} -> {}", " ".join(args), message)
+        raise AdbError(message) from e
     return result.stdout
 
 
@@ -65,21 +71,34 @@ def _run_on_devices(
     itself, not caught here otherwise) is device-independent — the same broken input apk fails
     identically everywhere — so it's re-raised once instead of folded into that summary.
     """
+    if not devices:
+        logger.warning("No target device(s) found; nothing to {}", action)
+        return
+    logger.info(
+        "About to {} on {} device(s): {}", action, len(devices), ", ".join(devices)
+    )
+
     errors: dict[str, AdbError] = {}
     invalid_apk_error: InvalidApkError | None = None
-    if devices:
-        with ThreadPoolExecutor(max_workers=len(devices)) as pool:
-            future_to_device = {
-                pool.submit(worker, device): device for device in devices
-            }
-            for future in as_completed(future_to_device):
-                device = future_to_device[future]
-                try:
-                    future.result()
-                except InvalidApkError as e:
-                    invalid_apk_error = e
-                except AdbError as e:
-                    errors[device] = e
+    with ThreadPoolExecutor(max_workers=len(devices)) as pool:
+        future_to_device = {pool.submit(worker, device): device for device in devices}
+        for future in as_completed(future_to_device):
+            device = future_to_device[future]
+            try:
+                future.result()
+            except InvalidApkError as e:
+                invalid_apk_error = e
+            except AdbError as e:
+                logger.error("[{}] Failed to {}: {}", device, action, e)
+                errors[device] = e
+            else:
+                # Deliberately DEBUG, not INFO: this only means the worker thread returned
+                # without raising — it may have legitimately done nothing (e.g. skipped an
+                # incompatible apk). Each worker already logs its own explicit INFO-level
+                # success message ("Install commit succeeded" / "Uninstall succeeded") when it
+                # actually did something, so an INFO message here would be redundant on success
+                # and misleading (reads like "succeeded") right after a "skipping" warning.
+                logger.debug("[{}] Worker finished without error: {}", device, action)
 
     if invalid_apk_error is not None:
         raise invalid_apk_error
@@ -260,6 +279,7 @@ def _uninstall_on_device(
     version_code: int | None,
 ) -> None:
     adb_args = (adb, "-s", device)
+    logger.info("[{}] Uninstalling {}", device, package_name)
     _run(
         (
             *adb_args,
@@ -272,6 +292,7 @@ def _uninstall_on_device(
             package_name,
         )
     )
+    logger.info("[{}] Uninstall succeeded", device)
 
 
 def _install_on_device(
@@ -295,22 +316,43 @@ def _install_on_device(
     raises `AdbError`/`InvalidApkError` on failure rather than handling it, so the caller can
     attempt every other device before deciding how to report failures."""
     adb_args = (adb, "-s", device)
+    # "Candidate" — the compatible subset actually pushed can be smaller (e.g. only 1 of several
+    # lang/dpi/abi splits matches this device); see the "Pushing N apk(s)" message below for that.
+    logger.info(
+        "[{}] Resolving install from {} candidate apk(s)", device, len(apk_paths)
+    )
     tmp_dir: str | None = None
     try:
         tmp_dir = _run(
             (*adb_args, "shell", "mktemp", "-d", "--tmpdir=/data/local/tmp")
         ).strip()
+        logger.debug("[{}] Remote tmp dir: {}", device, tmp_dir)
 
         if check:
+            logger.debug("[{}] Checking device compatibility", device)
             apks_to_install = _resolve_apks_to_install(
-                apk_paths=apk_paths, adb_args=adb_args, skip_broken=skip_broken
+                device=device,
+                apk_paths=apk_paths,
+                adb_args=adb_args,
+                skip_broken=skip_broken,
             )
             if not apks_to_install:
+                # The specific reason (incompatible sdk/abi, no matching abi/dpi split, ...) was
+                # already logged as a WARNING inside `_resolve_apks_to_install` — this is just a
+                # DEBUG-level control-flow note, not a second warning for the same event.
+                logger.debug("[{}] Nothing to install; skipping", device)
                 return
         else:
             apks_to_install = {path: Path(path).stat().st_size for path in apk_paths}
 
+        logger.info(
+            "[{}] Pushing {} apk(s): {}",
+            device,
+            len(apks_to_install),
+            ", ".join(Path(p).name for p in apks_to_install),
+        )
         _run((*adb_args, "push", *apks_to_install, tmp_dir))
+        logger.debug("[{}] Creating install session", device)
         create_output = _run(
             (
                 *adb_args,
@@ -334,9 +376,18 @@ def _install_on_device(
                 f"Could not parse an install session id from: {create_output!r}"
             )
         session_id = session_match.group(0)
+        logger.debug("[{}] Install session {} created", device, session_id)
 
         for idx, (apk_path, size) in enumerate(apks_to_install.items()):
             basename = Path(apk_path).name
+            logger.debug(
+                "[{}] Writing {} ({}/{}) into session {}",
+                device,
+                basename,
+                idx + 1,
+                len(apks_to_install),
+                session_id,
+            )
             _run(
                 (
                     *adb_args,
@@ -350,16 +401,25 @@ def _install_on_device(
                     f"{tmp_dir}/{basename}",
                 )
             )
+        logger.debug("[{}] Committing install session {}", device, session_id)
         _run((*adb_args, "shell", "pm", "install-commit", session_id))
+        logger.info("[{}] Install commit succeeded", device)
 
         if obb_local_paths:
             # OBBs aren't part of a pm install session — they're just files in shared storage.
             obb_dir = f"/sdcard/Android/obb/{obb_package_name}"
+            logger.info(
+                "[{}] Pushing {} OBB file(s) to {}",
+                device,
+                len(obb_local_paths),
+                obb_dir,
+            )
             _run((*adb_args, "shell", "mkdir", "-p", obb_dir))
             for obb_path in obb_local_paths:
                 _run((*adb_args, "push", obb_path, f"{obb_dir}/{Path(obb_path).name}"))
     finally:
         if tmp_dir is not None:
+            logger.debug("[{}] Cleaning up remote tmp dir {}", device, tmp_dir)
             _run((*adb_args, "shell", "rm", "-rf", tmp_dir))
 
 
@@ -393,18 +453,44 @@ def _device_lang_codes(adb_args: tuple[str, ...]) -> set[str]:
     return {lang.split("-")[0] for lang in raw.split(",") if lang}
 
 
+def _device_density(adb_args: tuple[str, ...]) -> int | None:
+    """The device's effective screen density (dpi), or `None` if it can't be determined at all.
+
+    `ro.sf.lcd_density` is empty on at least some real devices/emulators (confirmed hands-on
+    against a real device) — `wm density` is the modern, reliable source (it's what actually
+    determines resource resolution today, including an accessibility "Display size" override,
+    which `ro.sf.lcd_density` never reflects even when it is set).
+    """
+    raw = _run((*adb_args, "shell", "getprop", "ro.sf.lcd_density")).strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    wm_output = _run((*adb_args, "shell", "wm", "density"))
+    override = re.search(r"Override density:\s*(\d+)", wm_output)
+    if override:
+        return int(override.group(1))
+    physical = re.search(r"Physical density:\s*(\d+)", wm_output)
+    return int(physical.group(1)) if physical else None
+
+
 def _resolve_apks_to_install(
-    *, apk_paths: list[str], adb_args: tuple[str, ...], skip_broken: bool
+    *, device: str, apk_paths: list[str], adb_args: tuple[str, ...], skip_broken: bool
 ) -> dict[str, int]:
     """Parse `apk_paths` and pick the subset compatible with the device targeted by `adb_args`."""
     all_apks: list[ApkFile] = []
     for apk_path in apk_paths:
         try:
             all_apks.append(ApkFile(apk_path))
-        except InvalidApkError:
+        except InvalidApkError as e:
             if not skip_broken:
                 raise
+            logger.warning("[{}] Skipping broken apk {}: {}", device, apk_path, e)
     if not all_apks:
+        logger.warning(
+            "[{}] No apk(s) left to install after skipping broken ones", device
+        )
         return {}
 
     lang_splits = tuple(a for a in all_apks if a.split_type == SplitType.LANGUAGE)
@@ -425,17 +511,35 @@ def _resolve_apks_to_install(
     device_sdk = int(
         _run((*adb_args, "shell", "getprop", "ro.build.version.sdk")).strip()
     )
+    logger.debug(
+        "[{}] Device sdk={}, abis={}",
+        device,
+        device_sdk,
+        ", ".join(abi.value for abi in device_abis),
+    )
 
     for apk in others:
         sdk_ok = apk.min_sdk_version is None or apk.min_sdk_version <= device_sdk
-        abi_ok = not apk.abis or any(
-            device_abi.is_compatible_with(apk_abi)
-            for apk_abi in apk.abis
-            for device_abi in device_abis
-        )
+        # Deliberately a literal membership check against `device_abis` (`ro.product.cpu.abilist`),
+        # not `Abi.is_compatible_with()`'s generic "a 64-bit ABI can run its 32-bit predecessor"
+        # rule — that's true of the CPU instruction set in the abstract, but not necessarily of a
+        # given system image's actual userspace. `abilist` is Android's own authoritative,
+        # self-reported answer (confirmed hands-on: a real arm64-v8a-only emulator image with no
+        # armeabi-v7a entry in its abilist rejected an armeabi-v7a-only apk with
+        # INSTALL_FAILED_NO_MATCHING_ABIS — `pm` never falls back beyond what's actually listed).
+        abi_ok = not apk.abis or any(apk_abi in device_abis for apk_abi in apk.abis)
         if sdk_ok and abi_ok:
             apks_to_install[_apk_path(apk)] = apk.size
+        else:
+            logger.debug(
+                "[{}] {} is incompatible (min_sdk_version={}, abis={}); skipping",
+                device,
+                Path(_apk_path(apk)).name,
+                apk.min_sdk_version,
+                ", ".join(abi.value for abi in apk.abis) or "any",
+            )
     if not apks_to_install:
+        logger.warning("[{}] No apk is compatible with this device", device)
         return {}
 
     if abi_splits:
@@ -451,7 +555,15 @@ def _resolve_apks_to_install(
             None,
         )
         if abi_split is None:
+            logger.warning(
+                "[{}] No abi split matches the device's main abi {}; skipping install",
+                device,
+                device_main_abi.value,
+            )
             return {}
+        logger.debug(
+            "[{}] Selected abi split {}", device, Path(_apk_path(abi_split)).name
+        )
         apks_to_install[_apk_path(abi_split)] = abi_split.size
 
     if lang_splits:
@@ -465,27 +577,52 @@ def _resolve_apks_to_install(
                 for lang in split.langs
             )
         ]
-        for split in matched or lang_splits:  # fall back to installing every lang split
+        chosen = matched or lang_splits  # fall back to installing every lang split
+        logger.debug(
+            "[{}] Device langs={}; selected lang split(s): {}",
+            device,
+            ", ".join(sorted(device_langs)),
+            ", ".join(Path(_apk_path(split)).name for split in chosen),
+        )
+        for split in chosen:
             apks_to_install[_apk_path(split)] = split.size
 
     if dpi_splits:
-        device_dpi = int(
-            _run((*adb_args, "shell", "getprop", "ro.sf.lcd_density")).strip()
-        )
-        best: tuple[int, ApkFile] | None = None
-        for split in dpi_splits:
-            bucket_name = (
-                split.split_name.rsplit(".", 1)[-1] if split.split_name else None
+        device_dpi = _device_density(adb_args)
+        if device_dpi is None:
+            # Density is genuinely unknown (confirmed hands-on: some devices/emulators leave
+            # `ro.sf.lcd_density` empty *and* `wm density` unparseable) — install every dpi split
+            # rather than guessing wrong or silently dropping density-specific resources, same
+            # fallback philosophy as the lang-split "install every split" case below.
+            logger.warning(
+                "[{}] Could not determine device density; installing every dpi split",
+                device,
             )
-            try:
-                dpi = DensityBucket(bucket_name).dpi if bucket_name else None
-            except ValueError:
-                dpi = None
-            if dpi is None:
-                continue
-            if best is None or abs(dpi - device_dpi) < abs(best[0] - device_dpi):
-                best = (dpi, split)
-        if best is not None:
-            apks_to_install[_apk_path(best[1])] = best[1].size
+            for split in dpi_splits:
+                apks_to_install[_apk_path(split)] = split.size
+        else:
+            best: tuple[int, ApkFile] | None = None
+            for split in dpi_splits:
+                bucket_name = (
+                    split.split_name.rsplit(".", 1)[-1] if split.split_name else None
+                )
+                try:
+                    dpi = DensityBucket(bucket_name).dpi if bucket_name else None
+                except ValueError:
+                    dpi = None
+                if dpi is None:
+                    continue
+                if best is None or abs(dpi - device_dpi) < abs(best[0] - device_dpi):
+                    best = (dpi, split)
+            if best is not None:
+                logger.debug(
+                    "[{}] Device dpi={}; selected dpi split {}",
+                    device,
+                    device_dpi,
+                    Path(_apk_path(best[1])).name,
+                )
+                apks_to_install[_apk_path(best[1])] = best[1].size
+            else:
+                logger.debug("[{}] No dpi split matched a known density bucket", device)
 
     return apks_to_install

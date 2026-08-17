@@ -157,3 +157,40 @@ def test_cli_info_apkv_encrypted_with_password(capsys, make_apkv) -> None:
     main(["info", path, "--password", "hunter2"])
     out = json.loads(capsys.readouterr().out)
     assert out["package_name"] == "com.politedroid"
+
+
+def test_cli_install_apkm_bundle_extracts_base_and_splits(mocker, make_apkm) -> None:
+    # Regression test: `install` used to hand bundle paths straight to `install_apks()`, which
+    # only understands raw .apk files, so a .apkm/.xapk/.apks/.apkv would fail with
+    # InvalidApkError instead of installing its base + splits.
+    mock_install = mocker.patch("apkfile.install.install_apks")
+    path = make_apkm(with_split=True)
+
+    main(["install", path, "--upgrade"])
+
+    assert mock_install.call_count == 1
+    kwargs = mock_install.call_args.kwargs
+    assert kwargs["upgrade"] is True
+    assert len(kwargs["apks"]) == 2  # base + 1 split
+
+
+def test_cli_install_apkv_encrypted_bundle_passes_password(mocker, make_apkv) -> None:
+    mock_install = mocker.patch("apkfile.install.install_apks")
+    path = make_apkv(encrypted=True, password="hunter2")
+
+    main(["install", path, "--password", "hunter2"])
+
+    assert mock_install.call_count == 1
+
+
+def test_cli_install_multiple_apk_paths_still_uses_install_apks(
+    mocker, politedroid_path: str
+) -> None:
+    # A base + split(s) passed as separate .apk paths should still go through install_apks()
+    # directly, not be mistaken for a single-file bundle.
+    mock_install = mocker.patch("apkfile.__main__.install_apks")
+
+    main(["install", politedroid_path, politedroid_path])
+
+    mock_install.assert_called_once()
+    assert mock_install.call_args.kwargs["apks"] == [politedroid_path, politedroid_path]

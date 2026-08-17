@@ -13,12 +13,15 @@ from functools import cached_property
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from loguru import logger
+
 from ._apk import ApkFile, _jsonable
 from ._obb import ObbFile
 from ._resources import ScreenSize
 from ._security import SecurityInfo
 from ._signing import SigningInfo
 from ._size import DexInfo, SizeBreakdown, sum_dex_infos, sum_size_breakdowns
+from ._util import sanitize_filename_component
 from .abi import Abi
 from .enums import FormFactor, InstallLocation
 from .exceptions import ApkFileError, InvalidApkError, InvalidBundleError
@@ -84,6 +87,7 @@ class _BaseBundle:
         skip_broken_splits: bool = False,
     ) -> None:
         self.path = Path(path)
+        logger.debug("Loading bundle from {}", self.path)
         self._zip = zipfile.ZipFile(self.path)
         try:
             with self._zip.open(manifest_name) as f:
@@ -178,12 +182,19 @@ class _BaseBundle:
         except KeyError:
             return None
 
-    def extract_icon(self, path: str | os.PathLike[str]) -> None:
-        """Write this bundle's icon to `path`."""
+    def extract_icon(self, path: str | os.PathLike[str] | None = None) -> None:
+        """
+        Write this bundle's icon to `path`.
+
+        Args:
+            path: Where to write the icon. Defaults to `self._icon_name` in the current working directory.
+        """
         data = self.icon_bytes
         if data is None:
             raise ApkFileError(f"{self.path!r} has no icon")
-        Path(path).write_bytes(data)
+        target = Path(path) if path is not None else Path.cwd() / self._icon_name
+        logger.info("Extracting icon to {}", target)
+        target.write_bytes(data)
 
     # -- fields derived from base/splits (lazy: only extracted on first access) ---------------
 
@@ -316,9 +327,18 @@ class _BaseBundle:
         return zipfile.ZipFile(self.path)
 
     def extract(
-        self, path: str | os.PathLike[str], members: Iterable[str] | None = None
+        self,
+        path: str | os.PathLike[str] = ".",
+        members: Iterable[str] | None = None,
     ) -> None:
-        """Extract files from within the archive to a directory."""
+        """
+        Extract files from within the archive to a directory.
+
+        Args:
+            path: Path to the directory to extract to. Defaults to the current working directory.
+            members: An optional list of names to extract. If not provided, all files will be extracted.
+        """
+        logger.info("Extracting {} to {}", self.path, path)
         self._zip.extractall(path=path, members=members)
 
     def rename(self, name: str) -> None:
@@ -327,6 +347,9 @@ class _BaseBundle:
 
         Args:
             name: The new name of the file. Can contain `{attr}` format fields for any str/int attribute.
+                Values substituted into `{attr}` fields have filesystem-illegal characters (`<>:"/\\|?*`,
+                relevant on Windows even though POSIX only forbids `/`) replaced with `_`, since those
+                values can carry arbitrary apk-controlled text (e.g. `version_name`).
 
         Raises:
             TypeError: If a format field isn't a str/int attribute of this instance.
@@ -339,8 +362,11 @@ class _BaseBundle:
                 raise TypeError(
                     f"{field!r} is not a str/int attribute of {self.__class__.__name__}"
                 )
-            values[field] = value
+            values[field] = (
+                sanitize_filename_component(value) if isinstance(value, str) else value
+            )
         new_path = self.path.parent / name.format(**values)
+        logger.info("Renaming bundle {} -> {}", self.path, new_path)
         self._close_for_rename()
         self.path = self.path.rename(new_path)
         self._reopen_after_rename()
@@ -398,6 +424,11 @@ class _BaseBundle:
         """
         from .install import install_apks
 
+        logger.debug(
+            "Extracting bundle {} (base + {} split(s)) to a temp dir for install",
+            self.path,
+            len(self.splits),
+        )
         with tempfile.TemporaryDirectory(prefix="apkfile-") as tmp_dir:
             apk_paths = []
             base_path = Path(tmp_dir) / (

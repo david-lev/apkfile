@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 if TYPE_CHECKING:
     from ._bundle import _BaseBundle
 
@@ -41,6 +43,13 @@ class ObbFile:
         """Read this obb file's raw bytes directly out of the bundle's archive."""
         return self._bundle._zip.read(self._zip_name)
 
-    def extract(self, path: str | os.PathLike[str]) -> None:
-        """Write this obb file's bytes to `path`."""
-        Path(path).write_bytes(self.read_bytes())
+    def extract(self, path: str | os.PathLike[str] | None = None) -> None:
+        """
+        Write this obb file's bytes to `path`.
+
+        Args:
+            path: Where to write the obb file. Defaults to `self.name` in the current working directory.
+        """
+        target = Path(path) if path is not None else Path.cwd() / self.name
+        logger.debug("Extracting obb {} to {}", self.name, target)
+        target.write_bytes(self.read_bytes())

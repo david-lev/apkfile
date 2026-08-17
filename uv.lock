@@ -50,11 +50,12 @@ wheels = [
 
 [[package]]
 name = "apkfile"
-version = "1.1.0"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "androguard" },
     { name = "cryptography" },
+    { name = "loguru" },
 ]
 
 [package.dev-dependencies]
@@ -76,6 +77,7 @@ docs = [
 requires-dist = [
     { name = "androguard", specifier = ">=4.1,<5" },
     { name = "cryptography", specifier = ">=46,<51" },
+    { name = "loguru", specifier = ">=0.7,<1" },
 ]
 
 [package.metadata.requires-dev]

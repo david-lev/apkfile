@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from apkfile import install_apks, uninstall_apks
+from apkfile.abi import Abi
 from apkfile.enums import SplitType
 from apkfile.exceptions import AdbError, AdbNotFoundError, InvalidApkError
 from apkfile.install import _device_lang_codes, _find_adb
@@ -71,6 +73,65 @@ def test_install_with_check_skips_incompatible_sdk(
     install_apks(politedroid_path, check=True)
 
     assert not any(_has("push")(c) for c in fake_adb.calls)
+
+
+def test_install_with_check_skips_apk_whose_only_abi_is_absent_from_device_abilist(
+    fake_adb, mocker, tmp_path
+) -> None:
+    # Regression test for a real device found with `ro.product.cpu.abilist` reporting only
+    # "arm64-v8a" (no armeabi-v7a fallback entry, e.g. some arm64-only system images) trying to
+    # install an armeabi-v7a-only apk. `Abi.is_compatible_with()`'s generic "a 64-bit ABI can run
+    # its 32-bit predecessor" rule used to let this through, and the device's `pm install-commit`
+    # then rejected it with INSTALL_FAILED_NO_MATCHING_ABIS — `abilist` is Android's own
+    # authoritative, self-reported list, and apkfile must not second-guess it.
+    apk_path = tmp_path / "app.apk"
+    apk_path.write_bytes(b"fake")
+    fake_apk = SimpleNamespace(
+        split_type=None,
+        split_name=None,
+        langs=(),
+        abis=(Abi.ARM7,),
+        min_sdk_version=None,
+        size=1,
+        path=apk_path,
+    )
+    mocker.patch("apkfile.install.ApkFile", side_effect=lambda p: fake_apk)
+
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("getprop", "ro.product.cpu.abilist"), "arm64-v8a\n")
+    fake_adb.on(_has("getprop", "ro.build.version.sdk"), "33\n")
+
+    install_apks(str(apk_path), check=True)
+
+    assert not any(_has("push")(c) for c in fake_adb.calls)
+
+
+def test_install_with_check_installs_apk_whose_abi_is_in_device_abilist(
+    fake_adb, mocker, tmp_path
+) -> None:
+    apk_path = tmp_path / "app.apk"
+    apk_path.write_bytes(b"fake")
+    fake_apk = SimpleNamespace(
+        split_type=None,
+        split_name=None,
+        langs=(),
+        abis=(Abi.ARM7,),
+        min_sdk_version=None,
+        size=1,
+        path=apk_path,
+    )
+    mocker.patch("apkfile.install.ApkFile", side_effect=lambda p: fake_apk)
+
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("getprop", "ro.product.cpu.abilist"), "arm64-v8a,armeabi-v7a\n")
+    fake_adb.on(_has("getprop", "ro.build.version.sdk"), "33\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    install_apks(str(apk_path), check=True)
+
+    assert any(_has("push")(c) for c in fake_adb.calls)
 
 
 def test_explicit_device_id_skips_devices_listing(
@@ -230,6 +291,95 @@ def test_lang_split_matches_secondary_device_locale_not_just_primary(
     pushed = next(c for c in fake_adb.calls if _has("push")(c))
     assert str(en_path) in pushed
     assert str(he_path) in pushed
+
+
+def _make_dpi_split_fakes(tmp_path) -> tuple[dict, Path, Path, Path]:
+    base_path = tmp_path / "base.apk"
+    xhdpi_path = tmp_path / "config.xhdpi.apk"
+    xxhdpi_path = tmp_path / "config.xxhdpi.apk"
+    for p in (base_path, xhdpi_path, xxhdpi_path):
+        p.write_bytes(b"fake")
+
+    fakes = {
+        str(base_path): SimpleNamespace(
+            split_type=None,
+            split_name=None,
+            langs=(),
+            abis=(),
+            min_sdk_version=None,
+            size=1,
+            path=base_path,
+        ),
+        str(xhdpi_path): SimpleNamespace(
+            split_type=SplitType.DPI,
+            split_name="config.xhdpi",
+            langs=(),
+            abis=(),
+            min_sdk_version=None,
+            size=2,
+            path=xhdpi_path,
+        ),
+        str(xxhdpi_path): SimpleNamespace(
+            split_type=SplitType.DPI,
+            split_name="config.xxhdpi",
+            langs=(),
+            abis=(),
+            min_sdk_version=None,
+            size=3,
+            path=xxhdpi_path,
+        ),
+    }
+    return fakes, base_path, xhdpi_path, xxhdpi_path
+
+
+def test_dpi_split_falls_back_to_wm_density_when_lcd_density_prop_is_empty(
+    fake_adb, mocker, tmp_path
+) -> None:
+    # Regression test: a real device was found where `getprop ro.sf.lcd_density` returns an empty
+    # string (not unset — a real, observed case), which used to crash the whole install with a
+    # bare `ValueError` instead of falling back to `wm density`, the modern equivalent.
+    fakes, base_path, xhdpi_path, xxhdpi_path = _make_dpi_split_fakes(tmp_path)
+    mocker.patch("apkfile.install.ApkFile", side_effect=lambda p: fakes[str(p)])
+
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("getprop", "ro.product.cpu.abilist"), "arm64-v8a\n")
+    fake_adb.on(_has("getprop", "ro.build.version.sdk"), "33\n")
+    fake_adb.on(_has("getprop", "ro.sf.lcd_density"), "\n")
+    fake_adb.on(_has("wm", "density"), "Physical density: 480\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    install_apks([str(base_path), str(xhdpi_path), str(xxhdpi_path)], check=True)
+
+    pushed = next(c for c in fake_adb.calls if _has("push")(c))
+    assert (
+        str(xxhdpi_path) in pushed
+    )  # 480dpi is closer to xxhdpi (480) than xhdpi (320)
+    assert str(xhdpi_path) not in pushed
+
+
+def test_dpi_split_installs_every_split_when_density_is_undeterminable(
+    fake_adb, mocker, tmp_path
+) -> None:
+    # If both `ro.sf.lcd_density` and `wm density` fail to yield a usable number, every dpi split
+    # is installed rather than guessing wrong or dropping density-specific resources entirely —
+    # same fallback philosophy as the "install every lang split" case.
+    fakes, base_path, xhdpi_path, xxhdpi_path = _make_dpi_split_fakes(tmp_path)
+    mocker.patch("apkfile.install.ApkFile", side_effect=lambda p: fakes[str(p)])
+
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("getprop", "ro.product.cpu.abilist"), "arm64-v8a\n")
+    fake_adb.on(_has("getprop", "ro.build.version.sdk"), "33\n")
+    fake_adb.on(_has("getprop", "ro.sf.lcd_density"), "\n")
+    fake_adb.on(_has("wm", "density"), "\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    install_apks([str(base_path), str(xhdpi_path), str(xxhdpi_path)], check=True)
+
+    pushed = next(c for c in fake_adb.calls if _has("push")(c))
+    assert str(xhdpi_path) in pushed
+    assert str(xxhdpi_path) in pushed
 
 
 def test_obb_paths_pushed_after_successful_install(

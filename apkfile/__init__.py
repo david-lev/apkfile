@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 import loguru
 
@@ -35,9 +37,13 @@ from .exceptions import (
 )
 from .install import install_apks, uninstall_apks
 
-# androguard logs very verbosely via loguru by default; keep apkfile quiet unless the caller
-# explicitly re-enables it with `loguru.logger.enable("androguard")`.
+# Both androguard and apkfile itself log via loguru. androguard is very verbose by default, and
+# apkfile's own logging is opt-in (mirrors the standard library's logging philosophy: a library
+# should be silent unless its caller asks for output) — so both are disabled here, and re-enabled
+# with `loguru.logger.enable("androguard")` / `loguru.logger.enable("apkfile")` (the CLI's
+# `--verbose`/`-v` flag does the latter, plus attaches a colorized sink).
 loguru.logger.disable("androguard")
+loguru.logger.disable("apkfile")
 
 __all__ = [
     "Abi",
@@ -80,4 +86,12 @@ __all__ = [
 __copyright__ = f"Copyright {datetime.now(timezone.utc).year} David Lev"
 __license__ = "MIT"
 __title__ = "apkfile"
-__version__ = "1.1.0"
+try:
+    # `pyproject.toml`'s `[project] version` is the single source of truth — it's what ends up in
+    # the installed distribution's metadata (standard PEP 621 behavior for any build backend,
+    # including uv_build), so reading it back from there avoids keeping a second copy in sync here.
+    __version__ = _pkg_version("apkfile")
+except (
+    PackageNotFoundError
+):  # pragma: no cover - only when apkfile is used without being installed
+    __version__ = "0.0.0+unknown"

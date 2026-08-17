@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
+
+from loguru import logger
 
 if TYPE_CHECKING:
     from ._apk import ApkFile
@@ -121,6 +123,18 @@ class Icon:
         with self._apk.as_zip_file() as zf:
             return zf.read(self.path)
 
-    def extract(self, path: str | os.PathLike[str]) -> None:
-        """Write this icon's bytes to `path`."""
-        Path(path).write_bytes(self.read_bytes())
+    def extract(self, path: str | os.PathLike[str] | None = None) -> None:
+        """
+        Write this icon's bytes to `path`.
+
+        Args:
+            path: Where to write the icon. Defaults to this icon's own filename (the last path
+                segment of `self.path`) in the current working directory.
+        """
+        target = (
+            Path(path)
+            if path is not None
+            else Path.cwd() / PurePosixPath(self.path).name
+        )
+        logger.debug("Extracting icon {} to {}", self.path, target)
+        target.write_bytes(self.read_bytes())

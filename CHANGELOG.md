@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0]
+
+### Added
+
+- Opt-in logging via [loguru](https://github.com/Delgan/loguru) throughout the library (disabled by
+  default, same pattern as androguard's own — call `loguru.logger.enable("apkfile")` to see it).
+  `install_apks()`/`uninstall_apks()` log detailed per-device progress (pushing, install-session
+  create/write/commit, OBB push, cleanup).
+- `apkfile -v`/`-vv` CLI flag (after the subcommand, e.g. `apkfile install ... -v`): enables the above
+  with a colorized stderr sink. `-v` shows progress milestones, `-vv` also shows every individual `adb`
+  command.
+- `apkfile --version`.
+- `apkfile install` now accepts a single `.apkm`/`.xapk`/`.apks`/`.apkv` bundle path directly (previously
+  only raw `.apk` paths worked, so installing a bundle immediately failed with `InvalidApkError`); new
+  `apkfile install --password <pw>` for an encrypted `.apkv`.
+- `ApkFile.save()`/`.extract()`, bundle `.extract()`/`.extract_icon()`, `Icon.extract()`, `ObbFile.extract()`
+  now default `path` to the current working directory + the file's own name, instead of requiring an
+  explicit path.
+
+### Fixed
+
+- `ApkFile.rename()`/bundle `.rename()` now sanitize filesystem-illegal characters (`<>:"/\|?*`) out of
+  values substituted into `{attr}` format fields — a `version_name` (or other apk-controlled string)
+  containing e.g. `:` or `*` used to raise `OSError` on Windows (POSIX only forbids `/`, so this went
+  unnoticed there).
+- Device dpi-split selection no longer crashes with a bare `ValueError` when `ro.sf.lcd_density` is empty
+  (observed on a real device) — falls back to `wm density`, and installs every dpi split rather than
+  guessing wrong if density truly can't be determined.
+- ABI compatibility checking now trusts the device's own `ro.product.cpu.abilist` literally instead of
+  assuming a 64-bit ABI can always run its 32-bit predecessor — fixes spurious
+  `INSTALL_FAILED_NO_MATCHING_ABIS` failures on arm64-only system images (e.g. Android Studio's "Google
+  Play" `sdk_gphone64_arm64` images) that don't actually support running the armeabi-v7a-only apk being
+  installed.
+
+### Changed
+
+- `apkfile.__version__` is now read from the installed package's metadata (`importlib.metadata`) instead
+  of being hardcoded — `pyproject.toml`'s `version` is the single source of truth.
+- `loguru` is now a direct dependency (previously only present transitively via androguard).
+
 ## [1.1.0]
 
 ### Added

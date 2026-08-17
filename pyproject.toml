@@ -8,7 +8,7 @@ module-root = ""
 
 [project]
 name = "apkfile"
-version = "1.1.0"
+version = "1.2.0"
 description = "Python library for handling APK, APKM, XAPK, APKS, and APKV files"
 readme = "README.md"
 license = "MIT"
@@ -48,6 +48,7 @@ classifiers = [
 dependencies = [
     "androguard>=4.1,<5",
     "cryptography>=46,<51",
+    "loguru>=0.7,<1",
 ]
 
 [dependency-groups]
