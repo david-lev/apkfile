@@ -88,6 +88,9 @@ plugins:
             heading_level: 2
 
 extra:
+  analytics:
+    provider: google
+    property: G-9XFST5R8WT
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/david-lev/apkfile
