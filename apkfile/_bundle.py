@@ -394,7 +394,7 @@ class _BaseBundle:
         | Iterable[str | os.PathLike[str]]
         | None = None,
         adb_path: str | os.PathLike[str] | None = None,
-    ) -> None:
+    ) -> tuple[str, ...]:
         """
         Install this bundle's base + splits on a device using
         [adb](https://developer.android.com/studio/command-line/adb).
@@ -417,6 +417,10 @@ class _BaseBundle:
                 carries (see `XapkFile.obb_files`) — pushed to `/sdcard/Android/obb/<package>/` after a
                 successful install.
             adb_path: Path to the `adb` executable (if not in `PATH`).
+
+        Returns:
+            The device id(s) that actually had something installed (see
+            [`install_apks`][apkfile.install_apks]).
 
         Raises:
             AdbNotFoundError: If `adb` is not installed.
@@ -453,7 +457,7 @@ class _BaseBundle:
                 obb_path.write_bytes(obb.read_bytes())
                 obb_local_paths.append(str(obb_path))
 
-            install_apks(
+            return install_apks(
                 apks=apk_paths,
                 check=check,
                 upgrade=upgrade,
@@ -476,7 +480,7 @@ class _BaseBundle:
         user: str | None = None,
         version_code: int | None = None,
         adb_path: str | os.PathLike[str] | None = None,
-    ) -> None:
+    ) -> tuple[str, ...]:
         """
         Uninstall this bundle's package from a device using
         [adb](https://developer.android.com/studio/command-line/adb).
@@ -488,13 +492,17 @@ class _BaseBundle:
             version_code: Only uninstall if the installed app has this exact `versionCode`.
             adb_path: Path to the `adb` executable (if not in `PATH`).
 
+        Returns:
+            The device id(s) actually uninstalled from (see
+            [`uninstall_apks`][apkfile.uninstall_apks]).
+
         Raises:
             AdbNotFoundError: If `adb` is not installed.
             AdbError: If the `adb` command failed.
         """
         from .install import uninstall_apks
 
-        uninstall_apks(
+        return uninstall_apks(
             self.package_name,
             device_id=device_id,
             keep_data=keep_data,

@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0]
+
+### Added
+
+- `apkfile uninstall` now accepts a path to a `.apk`/`.apkm`/`.xapk`/`.apks`/`.apkv` file, in addition to a
+  bare package name — reads the package name out of it, same as `apkfile info`. New `apkfile uninstall
+  --password <pw>` for an encrypted `.apkv` path.
+- `docs/reference/cli.md`: a full `--help` reference page for every CLI subcommand.
+
+### Changed
+
+- `install_apks()`/`uninstall_apks()` (and `ApkFile`/every bundle's `.install()`/`.uninstall()`) now return
+  `tuple[str, ...]` — the device id(s) that actually had something installed/uninstalled — instead of
+  `None`. A device that was reached but had nothing compatible to install (or wasn't targeted at all) is
+  excluded, distinct from a real failure.
+- `apkfile install`/`apkfile uninstall` now always print a one-line outcome (e.g. `Installed on 1
+  device(s): emulator-5554`), regardless of `-v`, and exit `1` with `Nothing was installed/uninstalled
+  (...)` on stderr if no device ended up with anything actually done — previously this silently exited `0`
+  with no output at all, indistinguishable from a real success.
+- The `apkfile` CLI now catches apkfile's own exceptions (`AdbError`, `InvalidApkError`,
+  `InvalidBundleError`/`EncryptedBundleError`, `AdbNotFoundError`) and prints a clean `Error: ...` line +
+  exits `1`, instead of a raw Python traceback.
+
 ## [1.2.0]
 
 ### Added

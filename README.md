@@ -117,6 +117,7 @@ apkfile diff old.apk new.apk      # print the differences between two apks/bundl
 apkfile install app.apk           # install to connected device(s)
 apkfile install app.apk --upgrade --installer com.android.vending --adb-path /path/to/adb
 apkfile uninstall com.example.app # uninstall from connected device(s)
+apkfile uninstall app.apk         # ...or by apk/bundle path, reading its package name
 ```
 
 ### How this library works

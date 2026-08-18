@@ -17,6 +17,7 @@ from ._apk import ApkFile
 from ._apkv import ApkvFile
 from ._bundle import ApkmFile, ApksFile, XapkFile
 from .diff import diff as diff_apks
+from .exceptions import ApkFileError
 from .install import install_apks, uninstall_apks
 
 _LOG_FORMAT = (
@@ -79,6 +80,26 @@ def _cmd_diff(args: argparse.Namespace) -> None:
     print(json.dumps(dataclasses.asdict(diff_apks(a, b)), indent=2, default=str))
 
 
+def _report_outcome(acted: tuple[str, ...], *, verb: str) -> None:
+    """Print a plain (non-log, always-visible) one-line outcome for `install`/`uninstall`.
+
+    `install_apks`/`uninstall_apks` don't raise just because a device had nothing to do (e.g. no
+    apk compatible with it, or no device connected at all) — that's a legitimate outcome across
+    a multi-device run, not a failure. But it looks identical to a real success unless something
+    says otherwise, so this is unconditional, not gated behind `-v`/`-vv`. See the CLI Reference
+    docs for the specific reasons a device can end up with nothing done (`-v` shows them).
+    """
+    if acted:
+        print(f"{verb} on {len(acted)} device(s): {', '.join(acted)}")
+    else:
+        print(
+            f"Nothing was {verb.lower()} (no device found, or none had anything "
+            "compatible to act on). Re-run with -v for details.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def _cmd_install(args: argparse.Namespace) -> None:
     # A bundle (.apkm/.xapk/.apks/.apkv) is a single archive containing its own base+splits (and,
     # for .xapk, OBBs) — it needs its own `.install()`, which extracts them to a temp dir first,
@@ -90,7 +111,7 @@ def _cmd_install(args: argparse.Namespace) -> None:
         if suffix == ".apkv":
             loader_kwargs["password"] = args.password
         bundle = bundle_loader(args.paths[0], **loader_kwargs)
-        bundle.install(
+        installed = bundle.install(
             check=not args.no_check,
             upgrade=args.upgrade,
             device_id=args.device,
@@ -103,9 +124,10 @@ def _cmd_install(args: argparse.Namespace) -> None:
             obb_paths=args.obb,
             adb_path=args.adb_path,
         )
+        _report_outcome(installed, verb="Installed")
         return
 
-    install_apks(
+    installed = install_apks(
         apks=args.paths,
         check=not args.no_check,
         upgrade=args.upgrade,
@@ -120,17 +142,25 @@ def _cmd_install(args: argparse.Namespace) -> None:
         obb_paths=args.obb,
         adb_path=args.adb_path,
     )
+    _report_outcome(installed, verb="Installed")
 
 
 def _cmd_uninstall(args: argparse.Namespace) -> None:
-    uninstall_apks(
-        args.package,
+    package = args.package
+    # A path to an apk/bundle (rather than a bare package name) — read the package name out of
+    # it, same suffix-based dispatch `_cmd_install` uses to tell a bundle from a plain path.
+    if Path(package).suffix.lower() in _LOADERS:
+        package = _load(package, password=args.password).package_name
+
+    uninstalled = uninstall_apks(
+        package,
         device_id=args.device,
         keep_data=args.keep_data,
         user=args.user,
         version_code=args.version_code,
         adb_path=args.adb_path,
     )
+    _report_outcome(uninstalled, verb="Uninstalled")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -247,7 +277,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Uninstall a package from connected device(s)",
         parents=[verbose_parent],
     )
-    uninstall.add_argument("package", help="Package name to uninstall")
+    uninstall.add_argument(
+        "package",
+        help="Package name to uninstall, or a path to a .apk/.apkm/.xapk/.apks/.apkv "
+        "file to read the package name from",
+    )
+    uninstall.add_argument(
+        "--password",
+        default=None,
+        help="Password for an encrypted .apkv archive (only relevant if package is a path)",
+    )
     uninstall.add_argument("--device", default=None, help="Target a specific device id")
     uninstall.add_argument(
         "--keep-data",
@@ -275,7 +314,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
-    args.func(args)
+    try:
+        args.func(args)
+    except ApkFileError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
 
 
 if __name__ == "__main__":

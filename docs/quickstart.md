@@ -146,4 +146,8 @@ apkfile info app.apk              # print an apk/bundle's metadata as JSON
 apkfile diff old.apk new.apk      # print the differences between two apks/bundles as JSON
 apkfile install app.apk           # install to connected device(s)
 apkfile install app.apk --upgrade --installer com.android.vending --adb-path /path/to/adb
+apkfile uninstall com.example.app # uninstall from connected device(s)
+apkfile uninstall app.apk         # ...or by apk/bundle path, reading its package name
 ```
+
+See the [CLI Reference](reference/cli.md) for every command's full `--help` output.

@@ -55,10 +55,11 @@ def test_install_with_check_queries_device_and_installs_when_compatible(
     fake_adb.on(_has("getprop", "ro.build.version.sdk"), "33\n")
     fake_adb.on(_has("install-create"), "Success: created install session [42]\n")
 
-    install_apks(politedroid_path, check=True)
+    installed = install_apks(politedroid_path, check=True)
 
     assert any(_has("push")(c) for c in fake_adb.calls)
     assert any(_has("install-commit", "42")(c) for c in fake_adb.calls)
+    assert installed == ("emulator-5554",)
 
 
 def test_install_with_check_skips_incompatible_sdk(
@@ -70,9 +71,12 @@ def test_install_with_check_skips_incompatible_sdk(
     fake_adb.on(_has("getprop", "ro.product.cpu.abilist"), "arm64-v8a\n")
     fake_adb.on(_has("getprop", "ro.build.version.sdk"), "1\n")
 
-    install_apks(politedroid_path, check=True)
+    installed = install_apks(politedroid_path, check=True)
 
     assert not any(_has("push")(c) for c in fake_adb.calls)
+    # Nothing was actually installed, even though no AdbError was raised — the device was
+    # reached, just had nothing compatible to act on.
+    assert installed == ()
 
 
 def test_install_with_check_skips_apk_whose_only_abi_is_absent_from_device_abilist(
@@ -473,6 +477,30 @@ def test_multi_device_mktemp_failure_does_not_abort_other_device(
     assert not any(_has("rm", "-rf", "emulator-5554")(c) for c in fake_adb.calls)
 
 
+def test_install_multi_device_returns_only_devices_that_actually_installed(
+    fake_adb, politedroid_path: str
+) -> None:
+    fake_adb.on(
+        _has("devices"),
+        "List of devices attached\nemulator-5554\tdevice\nemulator-5556\tdevice\n",
+    )
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(
+        _has("getprop", "ro.product.cpu.abilist", "emulator-5554"), "arm64-v8a\n"
+    )
+    fake_adb.on(_has("getprop", "ro.build.version.sdk", "emulator-5554"), "1\n")
+    fake_adb.on(
+        _has("getprop", "ro.product.cpu.abilist", "emulator-5556"), "arm64-v8a\n"
+    )
+    fake_adb.on(_has("getprop", "ro.build.version.sdk", "emulator-5556"), "33\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    installed = install_apks(politedroid_path, check=True)
+
+    # emulator-5554's sdk (1) is below politedroid's min_sdk_version, so only 5556 installs.
+    assert installed == ("emulator-5556",)
+
+
 def test_multi_device_aggregated_error_names_every_failed_device(
     fake_adb, politedroid_path: str
 ) -> None:
@@ -531,14 +559,23 @@ def test_install_flags_omitted_by_default(fake_adb, politedroid_path: str) -> No
     assert "--user" not in create_call
 
 
+def test_install_with_no_devices_connected_returns_empty(
+    fake_adb, politedroid_path: str
+) -> None:
+    fake_adb.on(_has("devices"), "List of devices attached\n")
+
+    assert install_apks(politedroid_path, check=False) == ()
+
+
 def test_uninstall_single_device(fake_adb) -> None:
     fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
 
-    uninstall_apks("com.politedroid")
+    uninstalled = uninstall_apks("com.politedroid")
 
     uninstall_call = next(c for c in fake_adb.calls if _has("uninstall")(c))
     assert "com.politedroid" in uninstall_call
     assert "-k" not in uninstall_call
+    assert uninstalled == ("emulator-5554",)
 
 
 def test_uninstall_flags_passed_through(fake_adb) -> None:

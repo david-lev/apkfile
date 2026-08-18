@@ -24,6 +24,7 @@ nav:
       - Installing/Uninstalling (adb): reference/install.md
       - Enums (Abi, FormFactor, ...): reference/enums.md
       - Exceptions: reference/exceptions.md
+      - CLI Reference: reference/cli.md
 
 theme:
   name: material

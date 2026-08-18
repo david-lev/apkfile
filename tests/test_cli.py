@@ -137,12 +137,49 @@ def test_cli_uninstall_defaults(mocker) -> None:
     )
 
 
-def test_cli_info_apkv_requires_password(make_apkv) -> None:
-    from apkfile.exceptions import EncryptedBundleError
+def test_cli_uninstall_by_apk_path_resolves_package_name(
+    mocker, politedroid_path: str
+) -> None:
+    mock_uninstall = mocker.patch("apkfile.__main__.uninstall_apks")
+    main(["uninstall", politedroid_path])
+    assert mock_uninstall.call_args.args[0] == "com.politedroid"
 
+
+def test_cli_uninstall_by_bundle_path_resolves_package_name(mocker, make_apkm) -> None:
+    mock_uninstall = mocker.patch("apkfile.__main__.uninstall_apks")
+    path = make_apkm()
+    main(["uninstall", path])
+    assert mock_uninstall.call_args.args[0] == "com.politedroid"
+
+
+def test_cli_uninstall_by_encrypted_apkv_path_uses_password(mocker, make_apkv) -> None:
+    mock_uninstall = mocker.patch("apkfile.__main__.uninstall_apks")
     path = make_apkv(encrypted=True, password="hunter2")
-    with pytest.raises(EncryptedBundleError):
+    main(["uninstall", path, "--password", "hunter2"])
+    assert mock_uninstall.call_args.args[0] == "com.politedroid"
+
+
+def test_cli_uninstall_by_apk_path_still_passes_other_flags_through(
+    mocker, politedroid_path: str
+) -> None:
+    mock_uninstall = mocker.patch("apkfile.__main__.uninstall_apks")
+    main(["uninstall", politedroid_path, "--device", "emulator-5554", "--keep-data"])
+    mock_uninstall.assert_called_once_with(
+        "com.politedroid",
+        device_id="emulator-5554",
+        keep_data=True,
+        user=None,
+        version_code=None,
+        adb_path=None,
+    )
+
+
+def test_cli_info_apkv_requires_password(capsys, make_apkv) -> None:
+    path = make_apkv(encrypted=True, password="hunter2")
+    with pytest.raises(SystemExit) as excinfo:
         main(["info", path])
+    assert excinfo.value.code == 1
+    assert "password" in capsys.readouterr().err.lower()
 
 
 def test_cli_info_apkv_plain(capsys, make_apkv) -> None:
@@ -194,3 +231,57 @@ def test_cli_install_multiple_apk_paths_still_uses_install_apks(
 
     mock_install.assert_called_once()
     assert mock_install.call_args.kwargs["apks"] == [politedroid_path, politedroid_path]
+
+
+def test_cli_install_prints_confirmation_on_success(
+    capsys, mocker, politedroid_path: str
+) -> None:
+    mocker.patch("apkfile.__main__.install_apks", return_value=("emulator-5554",))
+    main(["install", politedroid_path])
+    out = capsys.readouterr().out
+    assert "emulator-5554" in out
+    assert "Installed" in out
+
+
+def test_cli_install_nothing_installed_exits_nonzero(
+    capsys, mocker, politedroid_path: str
+) -> None:
+    # Nothing raised (no AdbError), but no device had anything compatible to install — without
+    # this, the CLI used to exit 0 and print nothing at all, indistinguishable from success.
+    mocker.patch("apkfile.__main__.install_apks", return_value=())
+    with pytest.raises(SystemExit) as excinfo:
+        main(["install", politedroid_path])
+    assert excinfo.value.code == 1
+    assert "Nothing was installed" in capsys.readouterr().err
+
+
+def test_cli_uninstall_prints_confirmation_on_success(capsys, mocker) -> None:
+    mocker.patch("apkfile.__main__.uninstall_apks", return_value=("emulator-5554",))
+    main(["uninstall", "com.politedroid"])
+    out = capsys.readouterr().out
+    assert "emulator-5554" in out
+    assert "Uninstalled" in out
+
+
+def test_cli_uninstall_nothing_uninstalled_exits_nonzero(capsys, mocker) -> None:
+    mocker.patch("apkfile.__main__.uninstall_apks", return_value=())
+    with pytest.raises(SystemExit) as excinfo:
+        main(["uninstall", "com.politedroid"])
+    assert excinfo.value.code == 1
+    assert "Nothing was uninstalled" in capsys.readouterr().err
+
+
+def test_cli_install_adb_error_prints_clean_message_not_traceback(
+    capsys, mocker, politedroid_path: str
+) -> None:
+    from apkfile.exceptions import AdbError
+
+    mocker.patch(
+        "apkfile.__main__.install_apks", side_effect=AdbError("boom on emulator-5554")
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        main(["install", politedroid_path])
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert "boom on emulator-5554" in err
+    assert "Traceback" not in err

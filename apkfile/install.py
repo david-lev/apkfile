@@ -60,8 +60,8 @@ def _list_devices(adb: str, device_id: str | None) -> tuple[str, ...]:
 
 
 def _run_on_devices(
-    devices: tuple[str, ...], worker: Callable[[str], None], *, action: str
-) -> None:
+    devices: tuple[str, ...], worker: Callable[[str], bool], *, action: str
+) -> tuple[str, ...]:
     """Run `worker(device)` against every device in parallel (one thread per device — `adb` calls
     are I/O-bound, so this is a plain speedup with no GIL contention).
 
@@ -70,22 +70,27 @@ def _run_on_devices(
     failure is raised once every device has finished. An `InvalidApkError` (raised by `worker`
     itself, not caught here otherwise) is device-independent — the same broken input apk fails
     identically everywhere — so it's re-raised once instead of folded into that summary.
+
+    Returns the subset of `devices` (in their original order) whose `worker` call both completed
+    without raising *and* returned `True` — i.e. actually did something, as opposed to a device
+    that was reached but had nothing compatible to act on (`worker` returning `False`).
     """
     if not devices:
         logger.warning("No target device(s) found; nothing to {}", action)
-        return
+        return ()
     logger.info(
         "About to {} on {} device(s): {}", action, len(devices), ", ".join(devices)
     )
 
     errors: dict[str, AdbError] = {}
     invalid_apk_error: InvalidApkError | None = None
+    completed: dict[str, bool] = {}
     with ThreadPoolExecutor(max_workers=len(devices)) as pool:
         future_to_device = {pool.submit(worker, device): device for device in devices}
         for future in as_completed(future_to_device):
             device = future_to_device[future]
             try:
-                future.result()
+                completed[device] = future.result()
             except InvalidApkError as e:
                 invalid_apk_error = e
             except AdbError as e:
@@ -98,7 +103,12 @@ def _run_on_devices(
                 # success message ("Install commit succeeded" / "Uninstall succeeded") when it
                 # actually did something, so an INFO message here would be redundant on success
                 # and misleading (reads like "succeeded") right after a "skipping" warning.
-                logger.debug("[{}] Worker finished without error: {}", device, action)
+                logger.debug(
+                    "[{}] Worker finished without error: {} (did_something={})",
+                    device,
+                    action,
+                    completed[device],
+                )
 
     if invalid_apk_error is not None:
         raise invalid_apk_error
@@ -111,6 +121,8 @@ def _run_on_devices(
         raise AdbError(
             f"Failed to {action} on {len(errors)}/{len(devices)} device(s): {summary}"
         ) from next(iter(errors.values()))
+
+    return tuple(device for device in devices if completed.get(device))
 
 
 def install_apks(
@@ -128,7 +140,7 @@ def install_apks(
     user: str | None = None,
     obb_paths: str | os.PathLike[str] | Iterable[str | os.PathLike[str]] | None = None,
     adb_path: str | os.PathLike[str] | None = None,
-) -> None:
+) -> tuple[str, ...]:
     """
     Install apk(s) on android device(s) using [adb](https://developer.android.com/studio/command-line/adb).
 
@@ -176,6 +188,11 @@ def install_apks(
             (a bundle's own OBBs are already covered by `XapkFile.install()`).
         adb_path: Path to the `adb` executable (if not in `PATH`).
 
+    Returns:
+        The device id(s) that actually had something installed — excludes devices reached but
+        skipped as incompatible (or, with `check=False`, includes every targeted device that
+        didn't fail). Empty if no device was targeted at all, or none had anything compatible.
+
     Raises:
         AdbNotFoundError: If `adb` is not installed.
         AdbError: If an `adb` command failed on one or more devices.
@@ -199,7 +216,7 @@ def install_apks(
     # Resolved once (not per-device) since it's the same for every device and requires parsing an apk.
     obb_package_name = ApkFile(apk_paths[0]).package_name if obb_local_paths else None
 
-    _run_on_devices(
+    return _run_on_devices(
         devices,
         lambda device: _install_on_device(
             device,
@@ -229,7 +246,7 @@ def uninstall_apks(
     user: str | None = None,
     version_code: int | None = None,
     adb_path: str | os.PathLike[str] | None = None,
-) -> None:
+) -> tuple[str, ...]:
     """
     Uninstall a package from android device(s) using [adb](https://developer.android.com/studio/command-line/adb).
 
@@ -249,13 +266,16 @@ def uninstall_apks(
             (`pm uninstall --versionCode`).
         adb_path: Path to the `adb` executable (if not in `PATH`).
 
+    Returns:
+        The device id(s) actually uninstalled from. Empty if no device was targeted at all.
+
     Raises:
         AdbNotFoundError: If `adb` is not installed.
         AdbError: If an `adb` command failed on one or more devices.
     """
     adb = _find_adb(adb_path)
     devices = _list_devices(adb, device_id)
-    _run_on_devices(
+    return _run_on_devices(
         devices,
         lambda device: _uninstall_on_device(
             device,
@@ -277,7 +297,7 @@ def _uninstall_on_device(
     keep_data: bool,
     user: str | None,
     version_code: int | None,
-) -> None:
+) -> bool:
     adb_args = (adb, "-s", device)
     logger.info("[{}] Uninstalling {}", device, package_name)
     _run(
@@ -293,6 +313,7 @@ def _uninstall_on_device(
         )
     )
     logger.info("[{}] Uninstall succeeded", device)
+    return True
 
 
 def _install_on_device(
@@ -311,10 +332,11 @@ def _install_on_device(
     user: str | None,
     obb_local_paths: list[str],
     obb_package_name: str | None,
-) -> None:
+) -> bool:
     """Install `apk_paths` (+ `obb_local_paths`) on a single device. Runs in its own thread —
     raises `AdbError`/`InvalidApkError` on failure rather than handling it, so the caller can
-    attempt every other device before deciding how to report failures."""
+    attempt every other device before deciding how to report failures. Returns whether anything
+    was actually installed (`False` if `check` found nothing on this device to install)."""
     adb_args = (adb, "-s", device)
     # "Candidate" — the compatible subset actually pushed can be smaller (e.g. only 1 of several
     # lang/dpi/abi splits matches this device); see the "Pushing N apk(s)" message below for that.
@@ -341,7 +363,7 @@ def _install_on_device(
                 # already logged as a WARNING inside `_resolve_apks_to_install` — this is just a
                 # DEBUG-level control-flow note, not a second warning for the same event.
                 logger.debug("[{}] Nothing to install; skipping", device)
-                return
+                return False
         else:
             apks_to_install = {path: Path(path).stat().st_size for path in apk_paths}
 
@@ -417,6 +439,7 @@ def _install_on_device(
             _run((*adb_args, "shell", "mkdir", "-p", obb_dir))
             for obb_path in obb_local_paths:
                 _run((*adb_args, "push", obb_path, f"{obb_dir}/{Path(obb_path).name}"))
+        return True
     finally:
         if tmp_dir is not None:
             logger.debug("[{}] Cleaning up remote tmp dir {}", device, tmp_dir)

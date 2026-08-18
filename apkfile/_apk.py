@@ -532,7 +532,7 @@ class ApkFile:
         | Iterable[str | os.PathLike[str]]
         | None = None,
         adb_path: str | os.PathLike[str] | None = None,
-    ) -> None:
+    ) -> tuple[str, ...]:
         """
         Install this apk on a device using [adb](https://developer.android.com/studio/command-line/adb).
 
@@ -552,6 +552,10 @@ class ApkFile:
                 pairing) — pushed to `/sdcard/Android/obb/<package>/` after a successful install.
             adb_path: Path to the `adb` executable (if not in `PATH`).
 
+        Returns:
+            The device id(s) that actually had this apk installed (see
+            [`install_apks`][apkfile.install_apks]).
+
         Raises:
             AdbNotFoundError: If `adb` is not installed.
             AdbError: If the `adb` command failed.
@@ -559,7 +563,7 @@ class ApkFile:
         from .install import install_apks
 
         if self.path is not None:
-            install_apks(
+            return install_apks(
                 apks=self.path,
                 check=check,
                 upgrade=upgrade,
@@ -574,12 +578,11 @@ class ApkFile:
                 obb_paths=obb_paths,
                 adb_path=adb_path,
             )
-            return
         with tempfile.TemporaryDirectory(prefix="apkfile-") as tmp_dir:
             name = self._name if self._name.endswith(".apk") else f"{self._name}.apk"
             tmp_path = Path(tmp_dir) / name
             tmp_path.write_bytes(self.get_raw())
-            install_apks(
+            return install_apks(
                 apks=tmp_path,
                 check=check,
                 upgrade=upgrade,
@@ -603,7 +606,7 @@ class ApkFile:
         user: str | None = None,
         version_code: int | None = None,
         adb_path: str | os.PathLike[str] | None = None,
-    ) -> None:
+    ) -> tuple[str, ...]:
         """
         Uninstall this apk's package from a device using
         [adb](https://developer.android.com/studio/command-line/adb).
@@ -615,13 +618,17 @@ class ApkFile:
             version_code: Only uninstall if the installed app has this exact `versionCode`.
             adb_path: Path to the `adb` executable (if not in `PATH`).
 
+        Returns:
+            The device id(s) actually uninstalled from (see
+            [`uninstall_apks`][apkfile.uninstall_apks]).
+
         Raises:
             AdbNotFoundError: If `adb` is not installed.
             AdbError: If the `adb` command failed.
         """
         from .install import uninstall_apks
 
-        uninstall_apks(
+        return uninstall_apks(
             self.package_name,
             device_id=device_id,
             keep_data=keep_data,
