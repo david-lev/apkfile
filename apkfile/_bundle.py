@@ -15,7 +15,7 @@ from typing import Any
 
 from loguru import logger
 
-from ._apk import ApkFile, _jsonable
+from ._apk import ApkFile, _jsonable, _trim_to_basic_info
 from ._obb import ObbFile
 from ._resources import ScreenSize
 from ._security import SecurityInfo
@@ -393,6 +393,8 @@ class _BaseBundle:
         | os.PathLike[str]
         | Iterable[str | os.PathLike[str]]
         | None = None,
+        launch: bool = False,
+        launch_activity: str | None = None,
         adb_path: str | os.PathLike[str] | None = None,
     ) -> tuple[str, ...]:
         """
@@ -416,6 +418,11 @@ class _BaseBundle:
             obb_paths: Path(s) to extra OBB expansion file(s) to push alongside any this bundle already
                 carries (see `XapkFile.obb_files`) — pushed to `/sdcard/Android/obb/<package>/` after a
                 successful install.
+            launch: Launch the app on each device after a successful install — the app's
+                main/launcher activity, unless `launch_activity` names a different one. Not
+                launched by default.
+            launch_activity: Launch this specific fully-qualified activity after a successful
+                install, instead of the app's main/launcher activity. Implies `launch`.
             adb_path: Path to the `adb` executable (if not in `PATH`).
 
         Returns:
@@ -469,6 +476,8 @@ class _BaseBundle:
                 allow_test_packages=allow_test_packages,
                 user=user,
                 obb_paths=obb_local_paths or None,
+                launch=launch,
+                launch_activity=launch_activity,
                 adb_path=adb_path,
             )
 
@@ -511,12 +520,25 @@ class _BaseBundle:
             adb_path=adb_path,
         )
 
-    def as_dict(self) -> dict[str, Any]:
-        """Return a dict representation of the bundle."""
-        return {
+    def as_dict(self, *, full: bool = False) -> dict[str, Any]:
+        """
+        Return a dict representation of the bundle.
+
+        By default, several verbose/duplicative sections are left out to keep this digestible:
+        `security.permissions` (full AOSP detail per permission — the flat top-level
+        `permissions` list and `security.dangerous_permissions` are still included),
+        `security.exported_components`/`unprotected_exported_components`, `security.deep_links`,
+        `size_breakdown`, `dex_info`, and most `Certificate` fields under `signing.certificates`
+        (kept: `public_key_algorithm`, `public_key_bit_size`, `sha256`, `is_debug`).
+
+        Args:
+            full: Include every field/subfield listed above instead of the trimmed default.
+        """
+        result = {
             field: _jsonable(getattr(self, field))
             for field in (*self._BASE_FIELDS, *self._EXTRA_FIELDS)
         }
+        return result if full else _trim_to_basic_info(result)
 
     def __repr__(self) -> str:
         return (
@@ -727,3 +749,104 @@ class ApksFile(_BaseBundle):
                 skip_broken_splits=skip_broken_splits,
             )
             self.meta_version = 1
+
+    @classmethod
+    def create(
+        cls,
+        apks: str | os.PathLike[str] | Iterable[str | os.PathLike[str]],
+        output_path: str | os.PathLike[str] | None = None,
+        *,
+        meta_version: int = 2,
+        icon: bytes | None = None,
+    ) -> ApksFile:
+        """
+        Build a real, on-disk bundletool/SAI `.apks` set from a base apk + its splits.
+
+        Exactly one of `apks` must be a non-split apk (the base); every other one is written in
+        as a split, under its own original filename.
+
+        >>> ApksFile.create("path/to/apk_folder")
+        >>> ApksFile.create(
+        ...     ["path/to/base.apk", "path/to/split_config.arm64_v8a.apk"],
+        ...     "bundle.apks",
+        ... )
+
+        Args:
+            apks: A directory containing `.apk` files (a base apk + its splits, non-recursive), or
+                an iterable of `.apk` paths.
+            output_path: Where to write the `.apks` file. Defaults to
+                `{package_name}-{version_code}.apks` in the current directory.
+            meta_version: The SAI meta file format version to write (`1` or `2`).
+            icon: Optional icon PNG bytes to embed as `icon.png`.
+
+        Returns:
+            An [`ApksFile`][apkfile.ApksFile] opened from the newly written archive.
+
+        Raises:
+            InvalidBundleError: If `apks` resolves to no apk paths, none of them is a (non-split)
+                base apk, or more than one is.
+            InvalidApkError: If one of the apks fails to parse.
+            ValueError: If `meta_version` isn't `1` or `2`.
+        """
+        if meta_version not in (1, 2):
+            raise ValueError(f"meta_version must be 1 or 2, got {meta_version!r}")
+
+        if isinstance(apks, (str, os.PathLike)):
+            directory = Path(apks)
+            if not directory.is_dir():
+                raise InvalidBundleError(f"{str(directory)!r} is not a directory")
+            apk_paths = sorted(directory.glob("*.apk"))
+        else:
+            apk_paths = [Path(p) for p in apks]
+        if not apk_paths:
+            raise InvalidBundleError(f"No .apk files found in {apks!r}")
+
+        parsed = [ApkFile(p) for p in apk_paths]
+        bases = [a for a in parsed if not a.is_split]
+        if not bases:
+            raise InvalidBundleError(
+                f"No base apk found among {[str(p) for p in apk_paths]!r} "
+                "(every apk has a split name)"
+            )
+        if len(bases) > 1:
+            raise InvalidBundleError(
+                f"Multiple candidate base apks found (none has a split name): "
+                f"{[str(b.path) for b in bases]!r}"
+            )
+        base = bases[0]
+        splits = [a for a in parsed if a is not base]
+
+        manifest: dict[str, Any] = {
+            "package": base.package_name,
+            "label": base.labels.get("") or base.package_name,
+            "version_code": base.version_code,
+        }
+        if base.version_name is not None:
+            manifest["version_name"] = base.version_name
+        if base.min_sdk_version is not None:
+            manifest["min_sdk"] = base.min_sdk_version
+        if base.target_sdk_version is not None:
+            manifest["target_sdk"] = base.target_sdk_version
+        manifest_name = "meta.sai_v1.json"
+        if meta_version == 2:
+            manifest["meta_version"] = 2
+            manifest_name = "meta.sai_v2.json"
+
+        output = (
+            Path(output_path)
+            if output_path is not None
+            else Path.cwd() / f"{base.package_name}-{base.version_code}.apks"
+        )
+        logger.info(
+            "Writing .apks bundle to {} (base + {} split(s))", output, len(splits)
+        )
+        with zipfile.ZipFile(output, "w") as z:
+            z.writestr(manifest_name, json.dumps(manifest))
+            z.writestr("base.apk", base.get_raw())
+            for split in splits:
+                assert split.path is not None
+                z.writestr(split.path.name, split.get_raw())
+            if icon is not None:
+                z.writestr("icon.png", icon)
+
+        return cls(output)

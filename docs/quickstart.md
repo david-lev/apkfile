@@ -142,10 +142,12 @@ need [adb](https://developer.android.com/studio/command-line/adb) on `PATH`, or 
 ## Command-line interface
 
 ```bash
-apkfile info app.apk              # print an apk/bundle's metadata as JSON
+apkfile info app.apk              # print an apk/bundle's metadata as JSON (--full for every detail)
+apkfile pack /path/to/apk_folder  # build a real, on-disk .apks bundle from a base apk + splits
 apkfile diff old.apk new.apk      # print the differences between two apks/bundles as JSON
 apkfile install app.apk           # install to connected device(s)
 apkfile install app.apk --upgrade --installer com.android.vending --adb-path /path/to/adb
+apkfile install app.apk --launch  # ...and launch it afterwards (main activity, or --launch-activity)
 apkfile uninstall com.example.app # uninstall from connected device(s)
 apkfile uninstall app.apk         # ...or by apk/bundle path, reading its package name
 ```

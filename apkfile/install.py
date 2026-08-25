@@ -139,6 +139,8 @@ def install_apks(
     allow_test_packages: bool = False,
     user: str | None = None,
     obb_paths: str | os.PathLike[str] | Iterable[str | os.PathLike[str]] | None = None,
+    launch: bool = False,
+    launch_activity: str | None = None,
     adb_path: str | os.PathLike[str] | None = None,
 ) -> tuple[str, ...]:
     """
@@ -186,6 +188,12 @@ def install_apks(
         obb_paths: Path(s) to OBB expansion file(s) to push to `/sdcard/Android/obb/<package>/` after a
             successful install, e.g. for a standalone "apk + obb" pairing that isn't part of a bundle
             (a bundle's own OBBs are already covered by `XapkFile.install()`).
+        launch: Launch the app on each device after a successful install (`am start`) — the app's
+            main/launcher activity, unless `launch_activity` names a different one. Not launched by
+            default.
+        launch_activity: Launch this specific fully-qualified activity (e.g.
+            `"com.example.app.SettingsActivity"`) after a successful install, instead of the app's
+            main/launcher activity. Implies `launch`.
         adb_path: Path to the `adb` executable (if not in `PATH`).
 
     Returns:
@@ -214,7 +222,22 @@ def install_apks(
     devices = _list_devices(adb, device_id)
 
     # Resolved once (not per-device) since it's the same for every device and requires parsing an apk.
-    obb_package_name = ApkFile(apk_paths[0]).package_name if obb_local_paths else None
+    base_apk = (
+        ApkFile(apk_paths[0]) if obb_local_paths or launch or launch_activity else None
+    )
+    obb_package_name = base_apk.package_name if obb_local_paths and base_apk else None
+
+    launch_component: str | None = None
+    if launch or launch_activity:
+        assert base_apk is not None
+        activity = launch_activity or base_apk.launchable_activity
+        if activity is None:
+            logger.warning(
+                "No launchable activity found in {}; ignoring launch request",
+                apk_paths[0],
+            )
+        else:
+            launch_component = f"{base_apk.package_name}/{activity}"
 
     return _run_on_devices(
         devices,
@@ -233,6 +256,7 @@ def install_apks(
             user=user,
             obb_local_paths=obb_local_paths,
             obb_package_name=obb_package_name,
+            launch_component=launch_component,
         ),
         action="install apk(s)",
     )
@@ -332,6 +356,7 @@ def _install_on_device(
     user: str | None,
     obb_local_paths: list[str],
     obb_package_name: str | None,
+    launch_component: str | None,
 ) -> bool:
     """Install `apk_paths` (+ `obb_local_paths`) on a single device. Runs in its own thread —
     raises `AdbError`/`InvalidApkError` on failure rather than handling it, so the caller can
@@ -439,6 +464,10 @@ def _install_on_device(
             _run((*adb_args, "shell", "mkdir", "-p", obb_dir))
             for obb_path in obb_local_paths:
                 _run((*adb_args, "push", obb_path, f"{obb_dir}/{Path(obb_path).name}"))
+
+        if launch_component:
+            logger.info("[{}] Launching {}", device, launch_component)
+            _run((*adb_args, "shell", "am", "start", "-n", launch_component))
         return True
     finally:
         if tmp_dir is not None:

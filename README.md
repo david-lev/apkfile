@@ -87,6 +87,14 @@ print(xapk.abis, xapk.permissions, xapk.langs)
 apks = ApksFile("/home/david/Downloads/facebook.apks")
 print(apks.base.permissions, apks.md5, apks.sha256)
 
+# Build a real, on-disk .apks bundle from a folder of apks (a base apk + its splits)
+built = ApksFile.create(
+    "/home/david/Downloads/facebook_apks/"
+)  # or an explicit list of paths
+print(
+    built.path
+)  # com.facebook.katana-<version_code>.apks in the current dir, by default
+
 # Get apkv info (VInstall's format — https://github.com/vinstall/apkv-spec); optionally encrypted
 apkv = ApkvFile(
     "/home/david/Downloads/backup.apkv", password="hunter2"
@@ -102,6 +110,10 @@ apk.install(obb_paths=["main.1.com.example.game.obb"])
 # Installing to every connected device happens in parallel, not one at a time
 apk.install(grant_permissions=True, allow_downgrade=True)  # pm install -g -d
 
+# Launch the app after installing (main activity by default, or a specific one)
+apk.install(launch=True)
+apk.install(launch_activity="com.example.app.SettingsActivity")
+
 # Uninstall (same multi-device behavior as install: every connected device, in parallel)
 apk.uninstall()
 from apkfile import uninstall_apks
@@ -112,10 +124,12 @@ uninstall_apks("com.example.app", keep_data=True)
 ### CLI
 
 ```bash
-apkfile info app.apk              # print an apk/bundle's metadata as JSON
+apkfile info app.apk              # print an apk/bundle's metadata as JSON (--full for every detail)
+apkfile pack /path/to/apk_folder  # build a real, on-disk .apks bundle from a base apk + splits
 apkfile diff old.apk new.apk      # print the differences between two apks/bundles as JSON
 apkfile install app.apk           # install to connected device(s)
 apkfile install app.apk --upgrade --installer com.android.vending --adb-path /path/to/adb
+apkfile install app.apk --launch  # ...and launch it afterwards (main activity, or --launch-activity)
 apkfile uninstall com.example.app # uninstall from connected device(s)
 apkfile uninstall app.apk         # ...or by apk/bundle path, reading its package name
 ```

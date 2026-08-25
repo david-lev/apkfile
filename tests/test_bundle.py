@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import zipfile
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -213,6 +214,27 @@ def test_apkm_as_dict_and_repr(make_apkm: Callable[..., str]) -> None:
     assert repr(apkm) == "ApkmFile(pkg='com.politedroid', version=4, splits=1)"
 
 
+def test_apkm_as_dict_full_opt_in(make_apkm: Callable[..., str]) -> None:
+    apkm = ApkmFile(make_apkm())
+    default_dict = apkm.as_dict()
+    default_security = default_dict["security"]
+    assert "permissions" not in default_security
+    assert "exported_components" not in default_security
+    assert "unprotected_exported_components" not in default_security
+    assert "deep_links" not in default_security
+    assert "size_breakdown" not in default_dict
+    assert "dex_info" not in default_dict
+
+    full_dict = apkm.as_dict(full=True)
+    full_security = full_dict["security"]
+    assert "permissions" in full_security
+    assert "exported_components" in full_security
+    assert "unprotected_exported_components" in full_security
+    assert "deep_links" in full_security
+    assert "size_breakdown" in full_dict
+    assert "dex_info" in full_dict
+
+
 def test_xapk_basic_fields(make_xapk: Callable[..., str]) -> None:
     xapk = XapkFile(make_xapk())
     assert xapk.package_name == "com.politedroid"
@@ -316,6 +338,141 @@ def test_apks_signing_security_size_dex(make_apks: Callable[..., str]) -> None:
         apks.size_breakdown == apks.base.size_breakdown + apks.splits[0].size_breakdown
     )
     assert apks.dex_info == apks.base.dex_info + apks.splits[0].dex_info
+
+
+def test_apks_create_from_directory_single_base_no_splits(
+    tmp_path, politedroid_bytes: bytes
+) -> None:
+    (tmp_path / "politedroid.apk").write_bytes(politedroid_bytes)
+    out = tmp_path / "bundle.apks"
+
+    bundle = ApksFile.create(tmp_path, out)
+
+    assert bundle.path == out
+    assert out.exists()
+    assert bundle.package_name == "com.politedroid"
+    assert bundle.app_name == "Polite Droid"
+    assert bundle.version_code == 4
+    assert bundle.version_name == "1.3"
+    assert bundle.min_sdk_version == 3
+    assert bundle.meta_version == 2
+    assert bundle.splits == ()
+    with zipfile.ZipFile(out) as z:
+        assert set(z.namelist()) == {"meta.sai_v2.json", "base.apk"}
+
+
+def test_apks_create_defaults_output_to_package_and_version_in_cwd(
+    tmp_path, monkeypatch, politedroid_bytes: bytes
+) -> None:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "politedroid.apk").write_bytes(politedroid_bytes)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    bundle = ApksFile.create(src_dir)
+
+    expected = cwd / "com.politedroid-4.apks"
+    assert bundle.path == expected
+    assert expected.exists()
+
+
+def test_apks_create_from_explicit_paths_writes_meta_v1(
+    tmp_path, politedroid_bytes: bytes
+) -> None:
+    apk_path = tmp_path / "politedroid.apk"
+    apk_path.write_bytes(politedroid_bytes)
+    out = tmp_path / "bundle.apks"
+
+    bundle = ApksFile.create([apk_path], out, meta_version=1)
+
+    assert bundle.meta_version == 1
+    with zipfile.ZipFile(out) as z:
+        assert "meta.sai_v1.json" in z.namelist()
+        manifest = json.loads(z.read("meta.sai_v1.json"))
+        assert "meta_version" not in manifest
+
+
+def test_apks_create_writes_split_under_its_original_filename(
+    tmp_path, politedroid_bytes: bytes, test_debug_bytes: bytes
+) -> None:
+    from unittest.mock import patch
+
+    from apkfile._apk import ApkFile as RealApkFile
+
+    base_path = tmp_path / "politedroid.apk"
+    split_path = tmp_path / "test-debug.apk"
+    base_path.write_bytes(politedroid_bytes)
+    split_path.write_bytes(test_debug_bytes)
+
+    # test-debug.apk isn't a real split (no `split=` manifest attribute) — force its
+    # already-real ApkFile instance to look like one so create() treats it as a split
+    # rather than a second candidate base apk.
+    def _load(path):
+        apk = RealApkFile(path)
+        if Path(path) == split_path:
+            apk.__dict__["is_split"] = True
+            apk.__dict__["split_name"] = "config.test"
+        return apk
+
+    out = tmp_path / "bundle.apks"
+    with patch("apkfile._bundle.ApkFile", side_effect=_load):
+        bundle = ApksFile.create(tmp_path, out)
+
+    with zipfile.ZipFile(out) as z:
+        assert set(z.namelist()) == {"meta.sai_v2.json", "base.apk", "test-debug.apk"}
+    # cached_properties resolve lazily, outside the patch, via the real ApkFile._from_bytes.
+    assert bundle.package_name == "com.politedroid"
+    assert len(bundle.splits) == 1
+    assert bundle.splits[0]._name == "test-debug.apk"
+
+
+def test_apks_create_raises_when_no_apks_found(tmp_path) -> None:
+    with pytest.raises(InvalidBundleError, match="No .apk files"):
+        ApksFile.create(tmp_path, tmp_path / "bundle.apks")
+
+
+def test_apks_create_raises_when_no_base_apk_found(
+    tmp_path, politedroid_bytes: bytes
+) -> None:
+    from unittest.mock import patch
+
+    from apkfile._apk import ApkFile as RealApkFile
+
+    apk_path = tmp_path / "politedroid.apk"
+    apk_path.write_bytes(politedroid_bytes)
+
+    def _load(path):
+        apk = RealApkFile(path)
+        apk.__dict__["is_split"] = True
+        apk.__dict__["split_name"] = "config.test"
+        return apk
+
+    with (
+        patch("apkfile._bundle.ApkFile", side_effect=_load),
+        pytest.raises(InvalidBundleError, match="No base apk found"),
+    ):
+        ApksFile.create([apk_path], tmp_path / "bundle.apks")
+
+
+def test_apks_create_raises_when_multiple_base_apks_found(
+    tmp_path, politedroid_bytes: bytes, test_debug_bytes: bytes
+) -> None:
+    (tmp_path / "politedroid.apk").write_bytes(politedroid_bytes)
+    (tmp_path / "test-debug.apk").write_bytes(test_debug_bytes)
+
+    with pytest.raises(InvalidBundleError, match="Multiple candidate base apks"):
+        ApksFile.create(tmp_path, tmp_path / "bundle.apks")
+
+
+def test_apks_create_rejects_invalid_meta_version(
+    tmp_path, politedroid_bytes: bytes
+) -> None:
+    apk_path = tmp_path / "politedroid.apk"
+    apk_path.write_bytes(politedroid_bytes)
+    with pytest.raises(ValueError, match="meta_version"):
+        ApksFile.create([apk_path], tmp_path / "bundle.apks", meta_version=3)
 
 
 def test_missing_base_apk_entry_raises_lazily(

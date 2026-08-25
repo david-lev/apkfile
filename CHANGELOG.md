@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0]
+
+### Added
+
+- `ApksFile.create()`: build a real, on-disk bundletool/SAI `.apks` set from a directory of apks or an
+  explicit list of apk paths — auto-detects the base apk vs. its splits, writes each split under its own
+  original filename, and defaults its output path to `{package_name}-{version_code}.apks` in the current
+  directory. New `apkfile pack` CLI command (`-o/--output`, `--meta-version {1,2}`).
+- `install_apks()`/`ApkFile.install()`/every bundle's `.install()` gained `launch`/`launch_activity`: launch
+  the app on each device after a successful install (main/launcher activity by default, or a specific
+  fully-qualified activity). Not launched by default. New `apkfile install --launch`/`--launch-activity`.
+
+### Changed
+
+- `ApkFile.as_dict()`/bundle `as_dict()` (and `apkfile info`) now omit several verbose/duplicative sections
+  by default: full per-permission AOSP detail (`security.permissions` — the flat top-level `permissions`
+  list and `security.dangerous_permissions` are still included), `security.exported_components`/
+  `unprotected_exported_components`, `security.deep_links`, `size_breakdown`, `dex_info`, and most
+  `Certificate` fields under `signing.certificates` (kept: `public_key_algorithm`, `public_key_bit_size`,
+  `sha256`, `is_debug`). Pass `as_dict(full=True)` / `apkfile info --full` to include everything.
+
 ## [1.3.0]
 
 ### Added

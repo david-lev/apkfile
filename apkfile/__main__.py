@@ -72,7 +72,23 @@ def _load(path: str, *, password: str | None = None) -> Any:
 
 def _cmd_info(args: argparse.Namespace) -> None:
     apk = _load(args.path, password=args.password)
-    print(json.dumps(apk.as_dict(), indent=2, default=str))
+    print(json.dumps(apk.as_dict(full=args.full), indent=2, default=str))
+
+
+def _cmd_pack(args: argparse.Namespace) -> None:
+    # A lone positional is only treated as a directory to glob if it actually is one — a single
+    # explicit apk file (e.g. a base apk with no splits) must stay a one-element path list, not
+    # get coerced into `ApksFile.create`'s directory-glob mode.
+    apks = (
+        args.paths[0]
+        if len(args.paths) == 1 and Path(args.paths[0]).is_dir()
+        else args.paths
+    )
+    bundle = ApksFile.create(apks, args.output, meta_version=args.meta_version)
+    print(
+        f"Wrote {bundle.path} (package={bundle.package_name!r}, "
+        f"{len(bundle.splits)} split(s))"
+    )
 
 
 def _cmd_diff(args: argparse.Namespace) -> None:
@@ -122,6 +138,8 @@ def _cmd_install(args: argparse.Namespace) -> None:
             allow_test_packages=args.allow_test_packages,
             user=args.user,
             obb_paths=args.obb,
+            launch=args.launch,
+            launch_activity=args.launch_activity,
             adb_path=args.adb_path,
         )
         _report_outcome(installed, verb="Installed")
@@ -140,6 +158,8 @@ def _cmd_install(args: argparse.Namespace) -> None:
         allow_test_packages=args.allow_test_packages,
         user=args.user,
         obb_paths=args.obb,
+        launch=args.launch,
+        launch_activity=args.launch_activity,
         adb_path=args.adb_path,
     )
     _report_outcome(installed, verb="Installed")
@@ -191,7 +211,40 @@ def build_parser() -> argparse.ArgumentParser:
     info.add_argument(
         "--password", default=None, help="Password for an encrypted .apkv archive"
     )
+    info.add_argument(
+        "--full",
+        action="store_true",
+        help="Include verbose/duplicative sections omitted by default: full per-permission AOSP "
+        "detail, every activity/service/receiver/provider and its exported status, deep links, "
+        "size/dex breakdown, and full certificate fields",
+    )
     info.set_defaults(func=_cmd_info)
+
+    pack = subparsers.add_parser(
+        "pack",
+        help="Build a .apks bundle from a base apk + splits",
+        parents=[verbose_parent],
+    )
+    pack.add_argument(
+        "paths",
+        nargs="+",
+        help="A directory of .apk files, or explicit .apk file paths (a base apk + its splits)",
+    )
+    pack.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="Where to write the .apks file (defaults to "
+        "<package_name>-<version_code>.apks in the current directory)",
+    )
+    pack.add_argument(
+        "--meta-version",
+        type=int,
+        choices=(1, 2),
+        default=2,
+        help="SAI meta file format version to write (default: 2)",
+    )
+    pack.set_defaults(func=_cmd_pack)
 
     diff = subparsers.add_parser(
         "diff",
@@ -266,6 +319,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="OBB_PATH",
         help="Path(s) to OBB expansion file(s) to push alongside the apk(s)",
+    )
+    install.add_argument(
+        "--launch",
+        action="store_true",
+        help="Launch the app's main activity on each device after a successful install "
+        "(not launched by default)",
+    )
+    install.add_argument(
+        "--launch-activity",
+        default=None,
+        metavar="ACTIVITY",
+        help="Launch this specific fully-qualified activity after a successful install, "
+        "instead of the app's main activity (implies --launch)",
     )
     install.add_argument(
         "--adb-path", default=None, help="Path to the adb executable (if not in PATH)"

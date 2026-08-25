@@ -14,6 +14,63 @@ def test_cli_info_prints_json(capsys, politedroid_path: str) -> None:
     assert out["signing"]["schemes"] == ["v1"]
 
 
+def test_cli_info_omits_verbose_sections_by_default(
+    capsys, politedroid_path: str
+) -> None:
+    main(["info", politedroid_path])
+    out = json.loads(capsys.readouterr().out)
+    security = out["security"]
+    assert "permissions" not in security
+    assert "exported_components" not in security
+    assert "unprotected_exported_components" not in security
+    assert "deep_links" not in security
+    assert "size_breakdown" not in out
+    assert "dex_info" not in out
+
+
+def test_cli_info_includes_everything_with_full_flag(
+    capsys, politedroid_path: str
+) -> None:
+    main(["info", politedroid_path, "--full"])
+    out = json.loads(capsys.readouterr().out)
+    security = out["security"]
+    assert "permissions" in security
+    assert "exported_components" in security
+    assert "unprotected_exported_components" in security
+    assert "deep_links" in security
+    assert "size_breakdown" in out
+    assert "dex_info" in out
+
+
+def test_cli_pack_builds_apks_bundle(
+    capsys, tmp_path, politedroid_bytes: bytes
+) -> None:
+    (tmp_path / "politedroid.apk").write_bytes(politedroid_bytes)
+    out = tmp_path / "bundle.apks"
+
+    main(["pack", str(tmp_path), "--output", str(out)])
+
+    assert out.exists()
+    printed = capsys.readouterr().out
+    assert "com.politedroid" in printed
+    assert "0 split(s)" in printed
+
+
+def test_cli_pack_defaults_output_when_omitted(
+    capsys, tmp_path, monkeypatch, politedroid_bytes: bytes
+) -> None:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "politedroid.apk").write_bytes(politedroid_bytes)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    main(["pack", str(src_dir)])
+
+    assert (cwd / "com.politedroid-4.apks").exists()
+
+
 def test_cli_diff_prints_json(
     capsys, politedroid_path: str, test_debug_path: str
 ) -> None:
@@ -56,6 +113,8 @@ def test_cli_install_passes_all_flags_through(
             "all",
             "--obb",
             str(obb),
+            "--launch-activity",
+            "com.politedroid.SettingsActivity",
             "--adb-path",
             "/opt/adb",
         ]
@@ -73,6 +132,8 @@ def test_cli_install_passes_all_flags_through(
         allow_test_packages=True,
         user="all",
         obb_paths=[str(obb)],
+        launch=False,
+        launch_activity="com.politedroid.SettingsActivity",
         adb_path="/opt/adb",
     )
 
@@ -93,8 +154,17 @@ def test_cli_install_defaults(mocker, politedroid_path: str) -> None:
         allow_test_packages=False,
         user=None,
         obb_paths=None,
+        launch=False,
+        launch_activity=None,
         adb_path=None,
     )
+
+
+def test_cli_install_launch_flag(mocker, politedroid_path: str) -> None:
+    mock_install = mocker.patch("apkfile.__main__.install_apks")
+    main(["install", politedroid_path, "--launch"])
+    assert mock_install.call_args.kwargs["launch"] is True
+    assert mock_install.call_args.kwargs["launch_activity"] is None
 
 
 def test_cli_uninstall_passes_all_flags_through(mocker) -> None:

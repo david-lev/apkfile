@@ -146,9 +146,75 @@ def test_extract_pulls_manifest(tmp_path, politedroid_path: str) -> None:
 
 def test_as_dict_has_all_documented_fields(politedroid_path: str) -> None:
     apk = ApkFile(politedroid_path)
-    as_dict = apk.as_dict()
+    as_dict = apk.as_dict(full=True)
     assert as_dict["package_name"] == "com.politedroid"
     assert set(as_dict) == set(ApkFile._FIELDS)
+
+
+def test_as_dict_omits_verbose_sections_by_default(politedroid_path: str) -> None:
+    apk = ApkFile(politedroid_path)
+    as_dict = apk.as_dict()
+    security = as_dict["security"]
+    assert "permissions" not in security
+    assert "exported_components" not in security
+    assert "unprotected_exported_components" not in security
+    assert "deep_links" not in security
+    assert "dangerous_permissions" in security  # compact, kept by default
+    assert "size_breakdown" not in as_dict
+    assert "dex_info" not in as_dict
+    for certs in as_dict["signing"]["certificates"].values():
+        for cert in certs:
+            assert set(cert) == {
+                "public_key_algorithm",
+                "public_key_bit_size",
+                "sha256",
+                "is_debug",
+            }
+    # everything is still available on the object itself
+    assert apk.security.permissions
+    assert apk.security.exported_components
+    assert apk.security.unprotected_exported_components
+    assert apk.security.deep_links == ()  # politedroid.apk declares none
+    assert apk.size_breakdown
+    assert apk.dex_info
+
+
+def test_as_dict_full_includes_everything(politedroid_path: str) -> None:
+    apk = ApkFile(politedroid_path)
+    as_dict = apk.as_dict(full=True)
+    security = as_dict["security"]
+    assert security["exported_components"] == [
+        {
+            "name": c.name,
+            "type": c.type,
+            "exported": c.exported,
+            "permission": c.permission,
+            "read_permission": c.read_permission,
+            "write_permission": c.write_permission,
+            "has_intent_filter": c.has_intent_filter,
+        }
+        for c in apk.security.exported_components
+    ]
+    assert security["unprotected_exported_components"] == [
+        {
+            "name": c.name,
+            "type": c.type,
+            "exported": c.exported,
+            "permission": c.permission,
+            "read_permission": c.read_permission,
+            "write_permission": c.write_permission,
+            "has_intent_filter": c.has_intent_filter,
+        }
+        for c in apk.security.unprotected_exported_components
+    ]
+    assert len(security["permissions"]) == len(apk.security.permissions)
+    assert len(security["deep_links"]) == len(apk.security.deep_links)
+    assert "size_breakdown" in as_dict
+    assert "dex_info" in as_dict
+    for certs in as_dict["signing"]["certificates"].values():
+        for cert in certs:
+            assert "subject" in cert
+            assert "not_before" in cert
 
 
 def test_repr(politedroid_path: str) -> None:
@@ -175,6 +241,8 @@ def test_install_with_path_delegates_to_install_apks(
         allow_test_packages=False,
         user=None,
         obb_paths=None,
+        launch=False,
+        launch_activity=None,
         adb_path=None,
     )
 

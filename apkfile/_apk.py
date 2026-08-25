@@ -74,6 +74,37 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+# Kept on a `Certificate` dict in the non-`full` `as_dict()` view — enough to answer "is this
+# signed with a strong, non-debug key", without the identity/validity-period fields that make
+# `signing.certificates` big (and largely redundant across schemes, which usually share a cert).
+_CERTIFICATE_BASIC_FIELDS = frozenset(
+    {"public_key_algorithm", "public_key_bit_size", "sha256", "is_debug"}
+)
+
+
+def _trim_to_basic_info(result: dict[str, Any]) -> dict[str, Any]:
+    """Strip the verbose/duplicative sections `as_dict(full=False)` (the default) omits, in
+    place. See `ApkFile.as_dict`/the bundle classes' `as_dict` for what's cut and why."""
+    security = result.get("security")
+    if security is not None:
+        # `dangerous_permissions` (names only) and the flat top-level `permissions` list cover
+        # the common case; the full AOSP detail (protection level/group/label/description) per
+        # permission is the single biggest contributor to a large `as_dict()`/`info` output.
+        security.pop("permissions", None)
+        security.pop("exported_components", None)
+        security.pop("unprotected_exported_components", None)
+        security.pop("deep_links", None)
+    result.pop("size_breakdown", None)
+    result.pop("dex_info", None)
+    signing = result.get("signing")
+    if signing is not None:
+        for certs in signing.get("certificates", {}).values():
+            for cert in certs:
+                for key in [k for k in cert if k not in _CERTIFICATE_BASIC_FIELDS]:
+                    del cert[key]
+    return result
+
+
 def _load_apk(source: Path | bytes, *, raw: bool, display_name: str) -> _AndroguardAPK:
     try:
         # androguard's own type hints only declare `filename: str`, but it accepts a `Path`
@@ -531,6 +562,8 @@ class ApkFile:
         | os.PathLike[str]
         | Iterable[str | os.PathLike[str]]
         | None = None,
+        launch: bool = False,
+        launch_activity: str | None = None,
         adb_path: str | os.PathLike[str] | None = None,
     ) -> tuple[str, ...]:
         """
@@ -550,6 +583,11 @@ class ApkFile:
             user: Install for a specific user id, or `"all"`/`"current"`.
             obb_paths: Path(s) to OBB expansion file(s) to push alongside this apk (an "apk + obb"
                 pairing) — pushed to `/sdcard/Android/obb/<package>/` after a successful install.
+            launch: Launch the app on each device after a successful install — the app's
+                main/launcher activity, unless `launch_activity` names a different one. Not
+                launched by default.
+            launch_activity: Launch this specific fully-qualified activity after a successful
+                install, instead of the app's main/launcher activity. Implies `launch`.
             adb_path: Path to the `adb` executable (if not in `PATH`).
 
         Returns:
@@ -576,6 +614,8 @@ class ApkFile:
                 allow_test_packages=allow_test_packages,
                 user=user,
                 obb_paths=obb_paths,
+                launch=launch,
+                launch_activity=launch_activity,
                 adb_path=adb_path,
             )
         with tempfile.TemporaryDirectory(prefix="apkfile-") as tmp_dir:
@@ -595,6 +635,8 @@ class ApkFile:
                 allow_test_packages=allow_test_packages,
                 user=user,
                 obb_paths=obb_paths,
+                launch=launch,
+                launch_activity=launch_activity,
                 adb_path=adb_path,
             )
 
@@ -670,9 +712,22 @@ class ApkFile:
         "dex_info",
     )
 
-    def as_dict(self) -> dict[str, Any]:
-        """Return a dict representation of the apk file."""
-        return {field: _jsonable(getattr(self, field)) for field in self._FIELDS}
+    def as_dict(self, *, full: bool = False) -> dict[str, Any]:
+        """
+        Return a dict representation of the apk file.
+
+        By default, several verbose/duplicative sections are left out to keep this digestible:
+        `security.permissions` (full AOSP detail per permission — the flat top-level
+        `permissions` list and `security.dangerous_permissions` are still included),
+        `security.exported_components`/`unprotected_exported_components`, `security.deep_links`,
+        `size_breakdown`, `dex_info`, and most `Certificate` fields under `signing.certificates`
+        (kept: `public_key_algorithm`, `public_key_bit_size`, `sha256`, `is_debug`).
+
+        Args:
+            full: Include every field/subfield listed above instead of the trimmed default.
+        """
+        result = {field: _jsonable(getattr(self, field)) for field in self._FIELDS}
+        return result if full else _trim_to_basic_info(result)
 
     def __repr__(self) -> str:
         split = f", split={self.split_name!r}" if self.is_split else ""

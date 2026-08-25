@@ -427,6 +427,50 @@ def test_obb_paths_accepts_multiple_paths(
     assert any(_contains("patch.1.com.politedroid.obb", c) for c in fake_adb.calls)
 
 
+def test_launch_not_started_by_default(fake_adb, politedroid_path: str) -> None:
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    install_apks(politedroid_path, check=False)
+
+    assert not any(_has("am", "start")(c) for c in fake_adb.calls)
+
+
+def test_launch_starts_main_activity(fake_adb, politedroid_path: str) -> None:
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    install_apks(politedroid_path, check=False, launch=True)
+
+    assert any(
+        _has("am", "start", "-n", "com.politedroid/com.politedroid.Preferences")(c)
+        for c in fake_adb.calls
+    )
+
+
+def test_launch_activity_overrides_main_activity(
+    fake_adb, politedroid_path: str
+) -> None:
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    install_apks(
+        politedroid_path,
+        check=False,
+        launch_activity="com.politedroid.SomeOtherActivity",
+    )
+
+    assert any(
+        _has("am", "start", "-n", "com.politedroid/com.politedroid.SomeOtherActivity")(
+            c
+        )
+        for c in fake_adb.calls
+    )
+
+
 def test_multi_device_one_failure_does_not_prevent_other_device(
     fake_adb, politedroid_path: str
 ) -> None:

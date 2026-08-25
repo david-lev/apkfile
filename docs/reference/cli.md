@@ -17,11 +17,12 @@ Python traceback.
 
 ```
 $ apkfile --help
-usage: apkfile [-h] [--version] {info,diff,install,uninstall} ...
+usage: apkfile [-h] [--version] {info,pack,diff,install,uninstall} ...
 
 positional arguments:
-  {info,diff,install,uninstall}
+  {info,pack,diff,install,uninstall}
     info                Print an apk/bundle's metadata as JSON
+    pack                Build a .apks bundle from a base apk + splits
     diff                Print the differences between two apks/bundles as JSON
     install             Install apk(s) to connected device(s)
     uninstall           Uninstall a package from connected device(s)
@@ -38,7 +39,7 @@ Loads a single `.apk`/`.apkm`/`.xapk`/`.apks`/`.apkv` file and prints its metada
 
 ```
 $ apkfile info --help
-usage: apkfile info [-h] [-v] [--password PASSWORD] path
+usage: apkfile info [-h] [-v] [--password PASSWORD] [--full] path
 
 positional arguments:
   path                 Path to a .apk/.apkm/.xapk/.apks/.apkv file
@@ -48,6 +49,44 @@ options:
   -v, --verbose        Increase log verbosity (-v for progress, -vv for every
                        adb command)
   --password PASSWORD  Password for an encrypted .apkv archive
+  --full               Include verbose/duplicative sections omitted by
+                       default: full per-permission AOSP detail, every
+                       activity/service/receiver/provider and its exported
+                       status, deep links, size/dex breakdown, and full
+                       certificate fields
+```
+
+!!! note
+    By default, several verbose/duplicative sections are left out to keep this digestible:
+    `security.permissions` (full AOSP detail per permission — the flat top-level `permissions` list and
+    `security.dangerous_permissions` are still included), `security.exported_components`/
+    `unprotected_exported_components`, `security.deep_links`, `size_breakdown`, `dex_info`, and most
+    `Certificate` fields under `signing.certificates` (kept: `public_key_algorithm`, `public_key_bit_size`,
+    `sha256`, `is_debug`). Pass `--full` (or `as_dict(full=True)` from the library) to include everything.
+
+## `apkfile pack`
+
+Builds a real, on-disk bundletool/SAI `.apks` set from a base apk + its splits — see
+[`ApksFile.create`][apkfile.ApksFile.create] for the underlying behavior (base-apk detection, manifest
+format).
+
+```
+$ apkfile pack --help
+usage: apkfile pack [-h] [-v] [-o OUTPUT] [--meta-version {1,2}]
+                    paths [paths ...]
+
+positional arguments:
+  paths                 A directory of .apk files, or explicit .apk file paths
+                        (a base apk + its splits)
+
+options:
+  -h, --help            show this help message and exit
+  -v, --verbose         Increase log verbosity (-v for progress, -vv for every
+                        adb command)
+  -o, --output OUTPUT   Where to write the .apks file (defaults to
+                        <package_name>-<version_code>.apks in the current
+                        directory)
+  --meta-version {1,2}  SAI meta file format version to write (default: 2)
 ```
 
 ## `apkfile diff`
@@ -82,7 +121,8 @@ usage: apkfile install [-h] [-v] [--password PASSWORD] [--device DEVICE]
                        [--originating-uri ORIGINATING_URI]
                        [--grant-permissions] [--allow-downgrade]
                        [--allow-test-packages] [--user USER]
-                       [--obb OBB_PATH [OBB_PATH ...]] [--adb-path ADB_PATH]
+                       [--obb OBB_PATH [OBB_PATH ...]] [--launch]
+                       [--launch-activity ACTIVITY] [--adb-path ADB_PATH]
                        paths [paths ...]
 
 positional arguments:
@@ -116,6 +156,12 @@ options:
   --obb OBB_PATH [OBB_PATH ...]
                         Path(s) to OBB expansion file(s) to push alongside the
                         apk(s)
+  --launch              Launch the app's main activity on each device after a
+                        successful install (not launched by default)
+  --launch-activity ACTIVITY
+                        Launch this specific fully-qualified activity after a
+                        successful install, instead of the app's main activity
+                        (implies --launch)
   --adb-path ADB_PATH   Path to the adb executable (if not in PATH)
 ```
 
