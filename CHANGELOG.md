@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.1]
+
+### Fixed
+
+- Language-split matching against a connected device (`install_apks()`/`apkfile install`) now
+  accounts for the three languages where Android's resource-qualifier system (inherited from
+  `java.util.Locale`) still uses the pre-1989 ISO 639 code — Hebrew (`iw`), Indonesian (`in`), and
+  Yiddish (`ji`) — instead of the modern one a device reports its configured locale with (e.g.
+  `settings get system system_locales` returns `he-IL`, but bundletool names the matching split
+  `split_config.iw.apk`). Previously, a device configured for one of these three languages never
+  matched that language's split and — because a device's other configured languages usually still
+  matched directly — the "nothing matched, install every lang split" fallback never kicked in to
+  save it, so the split was silently skipped instead of installed.
+
 ## [1.4.0]
 
 ### Added

@@ -475,6 +475,21 @@ def _install_on_device(
             _run((*adb_args, "shell", "rm", "-rf", tmp_dir))
 
 
+# `java.util.Locale` — and by inheritance Android's resource-qualifier system, which is what
+# bundletool names a language split after (e.g. `split_config.iw.apk`) — still uses the pre-1989
+# ISO 639 codes for these three languages, while a device reports its configured locale with the
+# modern code (`settings get system system_locales` -> "he-IL", not "iw-IL"). Confirmed hands-on
+# against a real device + a real bundle: without expanding both directions here, a device
+# configured for one of these three languages never matches that language's split — and since a
+# device's *other* configured languages usually still match directly, the "nothing matched, install
+# every lang split" fallback in `_resolve_apks_to_install` never kicks in to save it; the split for
+# just this one language is silently dropped instead.
+_LEGACY_LANG_ALIASES = {"he": "iw", "id": "in", "yi": "ji"}
+_LEGACY_LANG_ALIASES.update(
+    {legacy: modern for modern, legacy in _LEGACY_LANG_ALIASES.items()}
+)
+
+
 def _device_lang_codes(adb_args: tuple[str, ...]) -> set[str]:
     """Base language subtags for every locale the device is configured for.
 
@@ -491,6 +506,10 @@ def _device_lang_codes(adb_args: tuple[str, ...]) -> set[str]:
     4. `ro.product.locale` — read-only, build-time default. Always present, so this is the
        guaranteed final fallback (matches what a fresh device boots with before any locale is
        ever explicitly configured).
+
+    The result also includes each code's legacy/modern Java locale-code alias (he/iw, id/in,
+    yi/ji — see `_LEGACY_LANG_ALIASES`), so it matches a language split regardless of which side
+    used which code.
     """
     for cmd in (
         ("getprop", "persist.sys.locales"),
@@ -502,7 +521,12 @@ def _device_lang_codes(adb_args: tuple[str, ...]) -> set[str]:
             break
     else:
         raw = _run((*adb_args, "shell", "getprop", "ro.product.locale")).strip()
-    return {lang.split("-")[0] for lang in raw.split(",") if lang}
+    base_langs = {lang.split("-")[0] for lang in raw.split(",") if lang}
+    return base_langs | {
+        _LEGACY_LANG_ALIASES[lang]
+        for lang in base_langs
+        if lang in _LEGACY_LANG_ALIASES
+    }
 
 
 def _device_density(adb_args: tuple[str, ...]) -> int | None:

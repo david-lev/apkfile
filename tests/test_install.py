@@ -208,7 +208,9 @@ def test_incompatible_device_still_cleans_up_tmp_dir(
 def test_device_lang_codes_uses_full_plural_locale_list(fake_adb) -> None:
     fake_adb.on(_has("persist.sys.locales"), "en-US,fr-FR,he-IL\n")
     adb = _find_adb(None)
-    assert _device_lang_codes((adb, "-s", "emulator-5554")) == {"en", "fr", "he"}
+    # "iw" (he's legacy Java/Android code) is included too — see
+    # test_device_lang_codes_expands_legacy_java_locale_aliases.
+    assert _device_lang_codes((adb, "-s", "emulator-5554")) == {"en", "fr", "he", "iw"}
 
 
 def test_device_lang_codes_falls_back_to_singular_locale_on_old_devices(
@@ -227,7 +229,7 @@ def test_device_lang_codes_falls_back_to_settings_provider(fake_adb) -> None:
     fake_adb.on(_has("persist.sys.locale"), "\n")
     fake_adb.on(_has("system_locales"), "he-IL,en-US\n")
     adb = _find_adb(None)
-    assert _device_lang_codes((adb, "-s", "emulator-5554")) == {"he", "en"}
+    assert _device_lang_codes((adb, "-s", "emulator-5554")) == {"he", "iw", "en"}
 
 
 def test_device_lang_codes_final_fallback_to_build_time_default(fake_adb) -> None:
@@ -241,6 +243,24 @@ def test_device_lang_codes_final_fallback_to_build_time_default(fake_adb) -> Non
     fake_adb.on(_has("ro.product.locale"), "en-US\n")
     adb = _find_adb(None)
     assert _device_lang_codes((adb, "-s", "emulator-5554")) == {"en"}
+
+
+def test_device_lang_codes_expands_legacy_java_locale_aliases(fake_adb) -> None:
+    # he/id/yi are the modern ISO 639 codes a device reports; iw/in/ji are the pre-1989 codes
+    # java.util.Locale (and Android's resource-qualifier system) still uses for these three
+    # languages specifically — a device configured for any of them must match a split named after
+    # either code.
+    fake_adb.on(_has("persist.sys.locales"), "he-IL,id-ID,yi-DE,en-US\n")
+    adb = _find_adb(None)
+    assert _device_lang_codes((adb, "-s", "emulator-5554")) == {
+        "he",
+        "iw",
+        "id",
+        "in",
+        "yi",
+        "ji",
+        "en",
+    }
 
 
 def test_lang_split_matches_secondary_device_locale_not_just_primary(
@@ -295,6 +315,61 @@ def test_lang_split_matches_secondary_device_locale_not_just_primary(
     pushed = next(c for c in fake_adb.calls if _has("push")(c))
     assert str(en_path) in pushed
     assert str(he_path) in pushed
+
+
+def test_lang_split_matches_device_locale_using_legacy_java_code(
+    fake_adb, mocker, tmp_path
+) -> None:
+    # Regression coverage for a real device + a real bundle (YouTube's .apks): the device reports
+    # its configured Hebrew locale as "he-IL" (settings get system system_locales), but bundletool
+    # names the matching split split_config.iw.apk — Android's resource-qualifier system (inherited
+    # from java.util.Locale) still uses the old ISO 639 code for Hebrew. Before the fix, "he" never
+    # matched "iw", and because the device's *other* configured languages (en/es/fr/ru) all matched
+    # directly, the "nothing matched, install every lang split" fallback never kicked in to save
+    # it — the Hebrew split was silently dropped instead of installed or falling back.
+    base_path = tmp_path / "base.apk"
+    lang_paths = {
+        lang: tmp_path / f"split_config.{lang}.apk"
+        for lang in ("en", "es", "fr", "iw", "ru")
+    }
+    for p in (base_path, *lang_paths.values()):
+        p.write_bytes(b"fake")
+
+    fakes = {
+        str(base_path): SimpleNamespace(
+            split_type=None,
+            langs=(),
+            abis=(),
+            min_sdk_version=None,
+            size=1,
+            path=base_path,
+        ),
+        **{
+            str(path): SimpleNamespace(
+                split_type=SplitType.LANGUAGE,
+                langs=(lang,),
+                abis=(),
+                min_sdk_version=None,
+                size=2,
+                path=path,
+            )
+            for lang, path in lang_paths.items()
+        },
+    }
+    mocker.patch("apkfile.install.ApkFile", side_effect=lambda p: fakes[str(p)])
+
+    fake_adb.on(_has("devices"), "List of devices attached\nemulator-5554\tdevice\n")
+    fake_adb.on(_has("mktemp"), "/data/local/tmp/xyz\n")
+    fake_adb.on(_has("getprop", "ro.product.cpu.abilist"), "arm64-v8a\n")
+    fake_adb.on(_has("getprop", "ro.build.version.sdk"), "33\n")
+    fake_adb.on(_has("system_locales"), "en-US,es-ES,he-IL,fr-FR,ru-RU\n")
+    fake_adb.on(_has("install-create"), "Success: created install session [1]\n")
+
+    install_apks([str(base_path), *(str(p) for p in lang_paths.values())], check=True)
+
+    pushed = next(c for c in fake_adb.calls if _has("push")(c))
+    for path in lang_paths.values():
+        assert str(path) in pushed
 
 
 def _make_dpi_split_fakes(tmp_path) -> tuple[dict, Path, Path, Path]:
