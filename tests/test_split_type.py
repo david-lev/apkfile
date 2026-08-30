@@ -39,6 +39,15 @@ def test_classify_uses_last_dot_segment_only() -> None:
     assert classify_split("com.example.config.hdpi", langs=(), abis=()) is SplitType.DPI
 
 
+def test_classify_language_split_with_only_regional_locales() -> None:
+    # A real-world `config.en` split can declare only region-qualified locales (androguard's
+    # `-r<REGION>` format) with no bare "en" entry -- the base subtag should still match.
+    assert (
+        classify_split("config.en", langs=("en-rGB", "en-rIN"), abis=())
+        is SplitType.LANGUAGE
+    )
+
+
 def test_classify_language_requires_exact_match_not_substring() -> None:
     # A previous version used a substring check (`tail in lang`), so a split named "config.b"
     # would wrongly classify as LANGUAGE just because "b" is a substring of "be" -- it should

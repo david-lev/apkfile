@@ -95,6 +95,16 @@ def classify_split(
         return SplitType.DPI
     if tail in langs:
         return SplitType.LANGUAGE
-    if len(abis) == 1:
+    # A split's declared langs aren't always the bare split name — e.g. a real-world `config.en`
+    # split can contain only region overrides (`en-rGB`, `en-rIN`, androguard's `-r<REGION>`
+    # qualifier format) with no bare "en" resource config at all, since the unqualified default
+    # strings live elsewhere. Falling back to each lang's base subtag catches that case.
+    base_langs = {loc.split("-r", 1)[0].split("-", 1)[0] for loc in langs}
+    if tail in base_langs:
+        return SplitType.LANGUAGE
+
+    abi_names = {abi.value for abi in abis}
+    abi_names.update(abi.value.replace("-", "_") for abi in abis)
+    if tail in abi_names:
         return SplitType.ABI
     return SplitType.OTHER

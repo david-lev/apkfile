@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.2]
+
+### Fixed
+
+- `classify_split()` (`SplitType` classification for `ApkFile.split_type` and every bundle split):
+  - A language split whose resources only declare region-qualified locales — e.g. a real-world
+    `config.en` split containing just `en-rGB`/`en-rIN` (androguard's `-r<REGION>` qualifier
+    format), with no bare `en` resource config at all since the unqualified default strings live
+    elsewhere — is now correctly classified as `LANGUAGE`, matched against each locale's base
+    subtag instead of requiring an exact match against the split name.
+  - ABI splits are now matched against the actual declared ABI value(s) (normalizing `-`/`_`, e.g.
+    `arm64-v8a` vs. a split named `config.arm64_v8a`) instead of the previous `len(abis) == 1`
+    heuristic, which could misclassify a split as `ABI` whenever exactly one ABI happened to
+    resolve for it, regardless of whether the split name actually matched that ABI.
+
 ## [1.4.1]
 
 ### Fixed
