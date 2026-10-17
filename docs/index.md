@@ -1,4 +1,4 @@
-# apkfile
+https://github.com/david-lev/apkfile/releases/tag/1.4.2# apkfile
 
 apkfile reads metadata out of Android `.apk`, `.apkm`, `.xapk`, `.apks`, and `.apkv` files — package name,
 version, permissions, supported ABIs/languages/densities, icons, signing certificates, manifest security
